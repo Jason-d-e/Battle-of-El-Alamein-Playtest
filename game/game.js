@@ -8,9 +8,11 @@
   const LANG_KEY = "zizi-el-alamein-lang";
   const AI_HUMAN_SIDE_KEY = "zizi-el-alamein-human-side-v1";
   const AI_GAME_MODE_KEY = "zizi-el-alamein-game-mode-v1";
+  const ONLINE_ROOM_SESSION_KEY = "zizi-el-alamein-online-room-v1";
   const TRAINING_LOG_KEY = "zizi-el-alamein-training-log-v1";
   const TRAINING_EVENT_KEY = "zizi-el-alamein-training-events-v1";
   const TRAINING_SESSION_KEY = "zizi-el-alamein-training-session-v1";
+  const HUMAN_DEMONSTRATION_RECORDING_KEY = "zizi-el-alamein-human-demonstration-recording-v1";
   const TRAINING_LOG_LIMIT = 420;
   const TRAINING_EVENT_LIMIT = 520;
   const AI_SCORE_BATCH_SIZE = 1;
@@ -32,7 +34,18 @@
   const aiHeuristicsPromise = import("./src/app/ai-heuristics.js?v=20260708-ai-heuristics-16");
   const aiPhaseSearchPromise = import("./src/app/ai-phase-search.js?v=20260709-ai-projection-1");
   const aiTacticsPromise = import("./src/app/ai-tactics.js?v=20260708-ai-tactics-1");
-  const aiAlphaBrowserPromise = import("./src/app/ai-alpha-browser.js?v=20260709-alpha-browser-8");
+  // The online/foundation build keeps the original scripted AI and does not load the Alpha model runtime.
+  const aiAlphaBrowserPromise = Promise.resolve(null);
+  const aiHumanDemonstrationPromise = import("./src/app/ai-alpha-human-demonstration.js?v=20260713-human-recorder-1");
+  const aiAlphaEnvironmentAdapterPromise = import("./src/app/ai-alpha-environment-adapter.js?v=20260713-human-recorder-1");
+  const aiAlphaTrainingPromise = import("./src/app/ai-alpha-training.js?v=20260713-human-recorder-1");
+  const alphaFingerprintPromise = import("../shared/wargame-alpha/fingerprint.js?v=20260713-human-recorder-1");
+  const onlineModulesPromise = Promise.all([
+    import("./src/app/supabase-online-transport.js?v=20260714-friend-playtest-1"),
+    import("./src/app/online-game-bridge.js?v=20260714-friend-playtest-1"),
+    import("./src/ui/online-multiplayer-panel.js?v=20260714-friend-playtest-1"),
+  ]).then(([transport, bridge, panel]) => ({ transport, bridge, panel }));
+  const aiAlphaModelPromise = Promise.resolve(null);
   const HIGHLIGHT = {
     selected: "rgba(0, 166, 166, 0.56)",
     reachable: "rgba(34, 124, 118, 0.34)",
@@ -514,24 +527,40 @@
     hotseatMode: "Hotseat Mode",
   });
   Object.assign(I18N.zh.ui, {
+    exportHumanDemonstration: "\u5bfc\u51fa\u4eba\u7c7b\u793a\u8303",
     aiThinking: "AI \u6b63\u5728\u6307\u6325 {side}",
     aiAwaitingInput: "AI \u5df2\u5b8c\u6210\u52a8\u4f5c\uff0c\u8bf7\u70b9\u51fb\u9636\u6bb5\u6309\u94ae\u7ee7\u7eed",
     aiWaiting: "\u4f60\u6307\u6325 {side}\uff0cAI \u6307\u6325 {enemy}",
     hotseatStatus: "",
+    trainingData: "训练数据",
+    preferenceSamples: "{count} 个偏好样本",
+    replayEvents: "{count} 个回放事件",
+    exportJson: "导出 JSON",
+    clearTrainingData: "清除",
   });
   Object.assign(I18N.en.ui, {
+    exportHumanDemonstration: "Export human demonstrations",
     aiThinking: "AI is commanding {side}",
     aiAwaitingInput: "AI has finished. Use the phase buttons to continue",
     aiWaiting: "You command {side}; AI commands {enemy}",
     hotseatStatus: "",
+    trainingData: "Training Data",
+    preferenceSamples: "{count} preference samples",
+    replayEvents: "{count} replay events",
+    exportJson: "Export JSON",
+    clearTrainingData: "Clear",
   });
   Object.assign(I18N.zh.text, {
+    humanDemonstrationExported: "\u5df2\u5bfc\u51fa\u4eba\u7c7b\u793a\u8303\uff1a{count}\u4e2a\u51b3\u7b56",
+    humanDemonstrationExportFailed: "\u4eba\u7c7b\u793a\u8303\u5bfc\u51fa\u5931\u8d25\uff1a{reason}",
     aiMovementDone: "AI 完成 {side} 移动。",
     aiCombatDone: "AI 完成 {side} 战斗。",
     aiNoMove: "AI 没有找到有利移动。",
     aiNoCombat: "AI 没有宣告战斗。",
   });
   Object.assign(I18N.en.text, {
+    humanDemonstrationExported: "Exported human demonstrations: {count} decisions",
+    humanDemonstrationExportFailed: "Human-demonstration export failed: {reason}",
     aiMovementDone: "AI completed {side} movement.",
     aiCombatDone: "AI completed {side} combat.",
     aiNoMove: "AI found no useful moves.",
@@ -549,6 +578,13 @@
     axisAiModeButton: document.getElementById("axisAiModeButton"),
     alliedAiModeButton: document.getElementById("alliedAiModeButton"),
     hotseatModeButton: document.getElementById("hotseatModeButton"),
+    onlineModeButton: document.getElementById("onlineModeButton"),
+    onlineSetupPanel: document.getElementById("onlineSetupPanel"),
+    onlineProjectUrlInput: document.getElementById("onlineProjectUrlInput"),
+    onlinePublishableKeyInput: document.getElementById("onlinePublishableKeyInput"),
+    onlineConnectButton: document.getElementById("onlineConnectButton"),
+    onlineSetupStatus: document.getElementById("onlineSetupStatus"),
+    onlinePanelRoot: document.getElementById("onlinePanelRoot"),
     startCampaignButton: document.getElementById("startCampaignButton"),
     continueCampaignButton: document.getElementById("continueCampaignButton"),
     menuLoadButton: document.getElementById("menuLoadButton"),
@@ -561,6 +597,7 @@
     turnLabel: document.getElementById("turnLabel"),
     phaseLabel: document.getElementById("phaseLabel"),
     aiStatus: document.getElementById("aiStatus"),
+    onlineGameStatus: document.getElementById("onlineGameStatus"),
     selectedUnit: document.getElementById("selectedUnit"),
     combatComposer: document.getElementById("combatComposer"),
     battleList: document.getElementById("battleList"),
@@ -578,6 +615,7 @@
     loadButton: document.getElementById("loadButton"),
     chartsButton: document.getElementById("chartsButton"),
     aarButton: document.getElementById("aarButton"),
+    exportHumanDemonstrationButton: document.getElementById("exportHumanDemonstrationButton"),
     returnMapButton: document.getElementById("returnMapButton"),
     aarMenuButton: document.getElementById("aarMenuButton"),
     aarTitle: document.getElementById("aarTitle"),
@@ -602,7 +640,11 @@
     aiWeights: null,
     aiAlphaBrowser: null,
     aiAlpha: null,
+    aiHumanDemonstration: null,
+    aiHumanDemonstrationAdapter: null,
+    aiHumanRecorder: null,
     aiAlphaAnalysisScheduler: null,
+    aiAlphaGameAdapter: null,
     scenario: null,
     rules: null,
     board: null,
@@ -632,6 +674,18 @@
       waitingForHuman: false,
       movementPlan: null,
     },
+    online: {
+      modules: null,
+      selected: false,
+      connecting: false,
+      runtime: null,
+      panel: null,
+      unsubscribe: null,
+      rulesetHash: null,
+      lastAppliedRevision: null,
+      submitting: false,
+      hadRoom: false,
+    },
   };
 
   const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -657,6 +711,14 @@
   }
 
   async function chooseAiAlphaAction(options = {}) {
+    if (app.aiAlphaGameAdapter?.chooseAction) {
+      const eventStateBefore = clone(app.state);
+      const recommendation = await app.aiAlphaGameAdapter.chooseAction({
+        searchOptions: options,
+      });
+      recordAlphaRecommendationEvent(recommendation, eventStateBefore);
+      if (recommendation?.ok && recommendation.action) return recommendation.action;
+    }
     return app.aiAlphaBrowser?.chooseBrowserAlphaAction?.({
       alpha: app.aiAlpha,
       scenario: app.scenario,
@@ -684,13 +746,31 @@
     return Boolean(app.aiAlphaBrowser?.isBrowserAlphaActionLegal?.(action, legalAlphaActions()));
   }
 
+  function recordAlphaRecommendationEvent(recommendation, stateBefore) {
+    const alpha = app.aiAlphaBrowser?.summarizeBrowserAlphaGameRecommendation?.(recommendation);
+    if (!alpha) return;
+    recordTrainingEvent("ALPHA_ACTION_RECOMMENDED", stateBefore, {
+      alpha,
+      action: alpha.action,
+      recommendationOk: alpha.ok,
+      recommendationReason: alpha.reason,
+      legalSelection: alpha.legalSelection,
+    });
+  }
+
   function alphaAssessmentSearchOptions() {
     return { ...AI_ALPHA_ANALYSIS_SEARCH };
   }
 
   function scheduleAlphaAssessment() {
-    if (!app.aiAlphaAnalysisScheduler || !app.aiAlpha?.client?.analyze || !app.state || app.state.winner) return;
+    if (app.ai.mode === "hotseat" || isOnlineMatch()) return;
+    if (!app.aiAlpha?.client?.analyze || !app.state || app.state.winner) return;
     if (app.animating || app.ai.running || el.body.dataset.view !== "game") return;
+    if (app.aiAlphaGameAdapter?.request) {
+      app.aiAlphaGameAdapter.request();
+      return;
+    }
+    if (!app.aiAlphaAnalysisScheduler) return;
     app.aiAlphaAnalysisScheduler.request({
       alpha: app.aiAlpha,
       scenario: app.scenario,
@@ -728,7 +808,18 @@
     return Boolean(summaryKey && currentKey && summaryKey === currentKey);
   }
 
+  function isAlphaAdapterSnapshotCurrent(snapshot = app.aiAlphaGameAdapter?.lastSnapshot) {
+    if (!snapshot || !isAlphaAssessmentSummaryCurrent()) return false;
+    const summaryHash = app.aiAlpha?.lastSummary?.stateHash || null;
+    return !summaryHash || !snapshot.stateHash || snapshot.stateHash === summaryHash;
+  }
+
   function currentAlphaBestAction() {
+    const snapshot = app.aiAlphaGameAdapter?.lastSnapshot;
+    const adapterAction = isAlphaAdapterSnapshotCurrent(snapshot) && snapshot?.action?.canApply
+      ? snapshot.action.selected
+      : null;
+    if (isLegalAlphaAction(adapterAction)) return adapterAction;
     const action = isAlphaAssessmentSummaryCurrent() ? app.aiAlpha.lastSummary?.bestAction || null : null;
     return isLegalAlphaAction(action) ? action : null;
   }
@@ -1218,6 +1309,176 @@
     draw();
   }
 
+  function createHumanDemonstrationAdapter({ environmentAdapterModule, trainingModule, fingerprintModule }) {
+    const coreAdapter = environmentAdapterModule.createElAlameinAlphaEnvironmentAdapter({
+      scenario: app.scenario,
+      rules: app.rules,
+      board: app.board,
+    });
+    const featureContract = trainingModule.alphaTrainingFeatureContract();
+    const fingerprints = {
+      scenario: fingerprintModule.canonicalSha256(app.scenario, "El Alamein human demonstration scenario"),
+      rules: fingerprintModule.canonicalSha256(app.rules, "El Alamein human demonstration rules"),
+      features: fingerprintModule.canonicalSha256(featureContract, "El Alamein human demonstration features"),
+    };
+    const adapter = {
+      id: "el-alamein",
+      version: "2.0",
+      factionIds: coreAdapter.players,
+      featureContract,
+      verifyDecision(state) {
+        const metadata = coreAdapter.metadata(state);
+        return {
+          stateHash: coreAdapter.stateHash(state),
+          turn: metadata.turn,
+          phase: metadata.phase,
+          side: coreAdapter.currentPlayer(state),
+          legalActions: coreAdapter.legalActions(state).map((entry) => entry.action),
+        };
+      },
+      getTerminalResult(state) {
+        const terminal = coreAdapter.terminalResult(state);
+        if (!terminal) return null;
+        return {
+          winnerId: terminal.winnerId,
+          stateHash: coreAdapter.stateHash(state),
+          stateFingerprint: app.aiHumanDemonstration.canonicalHumanStateFingerprint(state),
+        };
+      },
+      verifyTerminalEvidence(evidence) {
+        return this.getTerminalResult(evidence.finalStateSnapshot);
+      },
+      featuresForState(state, side) {
+        const environment = app.core.createEnvironment({
+          scenario: app.scenario,
+          rules: app.rules,
+          board: app.board,
+          state,
+        });
+        const metrics = app.core.environmentMetrics(environment);
+        const enemy = side === "axis" ? "allied" : "axis";
+        const maxTurn = Math.max(1, (app.rules.turns || []).length - 1);
+        return {
+          turnProgress: Math.max(0, Math.min(1, (Number(state.turn || 1) - 1) / maxTurn)),
+          materialBalance: Number(metrics.combatStrength?.[side] || 0) - Number(metrics.combatStrength?.[enemy] || 0),
+          unitBalance: Number(metrics.unitCount?.[side] || 0) - Number(metrics.unitCount?.[enemy] || 0),
+          axisObjectiveHeld: metrics.objectiveStatus?.ridgeFullControl || metrics.objectiveStatus?.elAlameinOccupied ? 1 : 0,
+          alliedBreakthroughReady: side === "allied" && Boolean(metrics.objectiveStatus?.alliedBreakthroughReady) ? 1 : 0,
+        };
+      },
+    };
+    return {
+      adapter,
+      fingerprints,
+      now: () => new Date().toISOString(),
+      createId: (kind, sequence) => `${kind}-${app.training.sessionId}-${sequence}`,
+    };
+  }
+
+  function loadHumanDemonstrationRecording() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(HUMAN_DEMONSTRATION_RECORDING_KEY) || "null");
+      return parsed?.schema === app.aiHumanDemonstration?.HUMAN_DEMONSTRATION_RECORDING_SCHEMA
+        ? parsed
+        : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function persistHumanDemonstrationRecording(recording) {
+    try {
+      if (!recording) localStorage.removeItem(HUMAN_DEMONSTRATION_RECORDING_KEY);
+      else localStorage.setItem(HUMAN_DEMONSTRATION_RECORDING_KEY, JSON.stringify(recording));
+    } catch (error) {
+      console.warn("Human-demonstration recording could not be persisted.", error);
+    }
+  }
+
+  function startHumanDemonstrationRecording() {
+    if (!app.aiHumanRecorder) return;
+    const suffix = Date.now().toString(36);
+    app.aiHumanRecorder.start({
+      datasetId: `human-demo-${app.training.sessionId}-${suffix}`,
+      gameId: `game-${app.training.sessionId}-${suffix}`,
+      generatedAt: new Date().toISOString(),
+    });
+  }
+
+  function humanDemonstrationPlayer(side) {
+    return {
+      sourceId: `human:${side}`,
+      participantId: app.aiHumanDemonstration.anonymousHumanParticipantId(`${app.training.sessionId}:${side}`),
+      metadata: {
+        consentVersion: "local-v1",
+        sourceCohort: "local-browser",
+      },
+    };
+  }
+
+  function recordHumanDemonstrationDecision(action, stateBefore = app.state, options = {}) {
+    if (!app.aiHumanRecorder || !stateBefore || stateBefore.winner) return false;
+    const snapshot = trainingStateSnapshot(stateBefore);
+    const facts = app.aiHumanDemonstrationAdapter?.verifyDecision(snapshot);
+    if (!facts) return false;
+    const side = options.side || facts.side;
+    if (!side || !isHumanControlledSide(side)) return false;
+    const compact = app.core.compactAction(action);
+    const legalActions = (facts.legalActions || []).map((entry) => app.core.compactAction(entry));
+    const chosenKey = app.aiHumanDemonstration.canonicalHumanActionKey(compact);
+    const isLegal = legalActions.some((entry) => (
+      app.aiHumanDemonstration.canonicalHumanActionKey(entry) === chosenKey
+    ));
+    if (!isLegal) return false;
+    app.aiHumanRecorder.recordDecision({
+      playerSourceId: humanDemonstrationPlayer(side).sourceId,
+      turn: facts.turn,
+      phase: facts.phase,
+      side,
+      stateHash: facts.stateHash,
+      stateSnapshot: snapshot,
+      legalActions,
+      chosenAction: compact,
+      expertBestAction: null,
+      rankedAlternatives: [],
+      confidence: null,
+      intent: null,
+      turnDoctrineTags: [],
+    }, humanDemonstrationPlayer(side));
+    return true;
+  }
+
+  function completeHumanDemonstrationRecording() {
+    if (!app.aiHumanRecorder || !app.state?.winner) return;
+    try {
+      app.aiHumanRecorder.complete(trainingStateSnapshot(app.state));
+    } catch (error) {
+      console.warn("Human-demonstration terminal recording failed.", error);
+    }
+  }
+
+  function exportHumanDemonstration() {
+    if (!app.aiHumanRecorder || !app.aiHumanDemonstration) return;
+    try {
+      const dataset = app.aiHumanRecorder.buildDataset();
+      const text = app.aiHumanDemonstration.serializeHumanDemonstrationDataset(dataset);
+      const blob = new Blob([text], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `el-alamein-human-demonstration-${dataset.datasetId}.json`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      log(tr("text.humanDemonstrationExported", { count: dataset.decisions.length }));
+    } catch (error) {
+      console.warn("Human-demonstration export failed.", error);
+      log(tr("text.humanDemonstrationExportFailed", { reason: String(error?.message || error) }));
+    }
+    draw();
+  }
+
   function makeStats() {
     return {
       axis: { units: 0, combat: 0 },
@@ -1296,17 +1557,38 @@
 
   async function init() {
     try {
-      const [core, phaseFlow, aiHeuristics, aiPhaseSearch, aiTactics, aiAlphaBrowser, scenario, rules, aiWeights, aiAlphaModel] = await Promise.all([
+      const [
+        core,
+        phaseFlow,
+        aiHeuristics,
+        aiPhaseSearch,
+        aiTactics,
+        aiAlphaBrowser,
+        aiHumanDemonstration,
+        aiAlphaEnvironmentAdapter,
+        aiAlphaTraining,
+        alphaFingerprint,
+        onlineModules,
+        scenario,
+        rules,
+        aiWeights,
+        aiAlphaModel,
+      ] = await Promise.all([
         coreRulesPromise,
         phaseFlowPromise,
         aiHeuristicsPromise,
         aiPhaseSearchPromise,
         aiTacticsPromise,
         aiAlphaBrowserPromise,
+        aiHumanDemonstrationPromise,
+        aiAlphaEnvironmentAdapterPromise,
+        aiAlphaTrainingPromise,
+        alphaFingerprintPromise,
+        onlineModulesPromise,
         fetchJson("local-data/scenario.json"),
         fetchJson("local-data/rules.json"),
         fetchJson("local-data/ai-weights-expert.json").catch(() => null),
-        fetchJson("local-data/alpha-model.json").catch(() => null),
+        aiAlphaModelPromise,
       ]);
       app.core = core;
       app.phaseFlow = phaseFlow;
@@ -1314,28 +1596,60 @@
       app.aiPhaseSearch = aiPhaseSearch;
       app.aiTactics = aiTactics;
       app.aiWeights = aiWeights;
+      app.online.modules = onlineModules;
       app.aiAlphaBrowser = aiAlphaBrowser;
-      app.aiAlpha = aiAlphaBrowser.createBrowserAlphaAi({
-        rawModel: aiAlphaModel,
-        scenario,
-        rules,
-        workerFactory: aiAlphaBrowser.createAlphaWorkerFactory(),
-        timeoutMs: 90,
-        logger: console,
-      });
-      app.aiAlphaAnalysisScheduler = aiAlphaBrowser.createBrowserAlphaAnalysisScheduler({
-        minIntervalMs: AI_ALPHA_ANALYSIS_INTERVAL_MS,
-        defaultSearchOptions: alphaAssessmentSearchOptions(),
-        onResult: () => {
-          if (app.state && el.body.dataset.view === "game" && isAlphaAssessmentSummaryCurrent()) draw();
-        },
-        onError: (error) => console.warn("Alpha AI realtime analysis failed.", error),
-      });
+      app.aiHumanDemonstration = aiHumanDemonstration;
+      if (aiAlphaBrowser) {
+        app.aiAlpha = aiAlphaBrowser.createBrowserAlphaAi({
+          rawModel: aiAlphaModel,
+          scenario,
+          rules,
+          workerFactory: aiAlphaBrowser.createAlphaWorkerFactory(),
+          timeoutMs: 90,
+          logger: console,
+        });
+        app.aiAlphaAnalysisScheduler = aiAlphaBrowser.createBrowserAlphaAnalysisScheduler({
+          minIntervalMs: AI_ALPHA_ANALYSIS_INTERVAL_MS,
+          defaultSearchOptions: alphaAssessmentSearchOptions(),
+          onResult: () => {
+            if (app.state && el.body.dataset.view === "game" && isAlphaAssessmentSummaryCurrent()) draw();
+          },
+          onError: (error) => console.warn("Alpha AI realtime analysis failed.", error),
+        });
+        app.aiAlphaGameAdapter = aiAlphaBrowser.createBrowserAlphaGameAdapter?.({
+          alpha: app.aiAlpha,
+          scenario,
+          rules,
+          getState: () => app.state,
+          getSide: () => activeSide(),
+          getLegalActions: () => legalAlphaActions(),
+          searchOptions: alphaAssessmentSearchOptions(),
+          minIntervalMs: AI_ALPHA_ANALYSIS_INTERVAL_MS,
+          onSnapshot: (snapshot) => {
+            if (app.state && el.body.dataset.view === "game" && snapshot?.status !== "pending" && isAlphaAssessmentSummaryCurrent()) draw();
+          },
+          onError: (error) => console.warn("Alpha AI realtime adapter failed.", error),
+          logger: console,
+        }) || null;
+      }
       app.scenario = scenario;
       app.rules = rules;
       app.board = app.core.createBoard(scenario);
       app.hexes = app.board.hexes;
       app.hexById = app.board.hexById;
+      app.online.rulesetHash = await app.online.modules.bridge.computeOnlineRulesetHash({ scenario, rules });
+      const humanAdapterContext = createHumanDemonstrationAdapter({
+        environmentAdapterModule: aiAlphaEnvironmentAdapter,
+        trainingModule: aiAlphaTraining,
+        fingerprintModule: alphaFingerprint,
+      });
+      app.aiHumanDemonstrationAdapter = humanAdapterContext.adapter;
+      app.aiHumanRecorder = app.aiHumanDemonstration.createHumanDemonstrationRecorder({
+        ...humanAdapterContext,
+        initialRecording: loadHumanDemonstrationRecording(),
+        onChange: persistHumanDemonstrationRecording,
+      });
+      if (!app.aiHumanRecorder.getRecording()) startHumanDemonstrationRecording();
       app.neighborCache.clear();
       app.distanceCache.clear();
       app.state = makeInitialState();
@@ -1374,6 +1688,8 @@
     el.axisAiModeButton.addEventListener("click", () => setGameMode("axis-vs-ai"));
     el.alliedAiModeButton.addEventListener("click", () => setGameMode("allied-vs-ai"));
     el.hotseatModeButton.addEventListener("click", () => setGameMode("hotseat"));
+    el.onlineModeButton.addEventListener("click", selectOnlineGameMode);
+    el.onlineConnectButton.addEventListener("click", () => void connectOnlineTestServer());
     el.startCampaignButton.addEventListener("click", startNewCampaign);
     el.continueCampaignButton.addEventListener("click", continueCampaign);
     el.menuLoadButton.addEventListener("click", () => loadGame({ fromMenu: true }));
@@ -1383,6 +1699,7 @@
     el.loadButton.addEventListener("click", () => loadGame({ fromMenu: false }));
     el.chartsButton.addEventListener("click", () => el.chartsDialog.showModal());
     el.aarButton.addEventListener("click", () => openAar(false));
+    el.exportHumanDemonstrationButton?.addEventListener("click", exportHumanDemonstration);
     el.returnMapButton.addEventListener("click", showGame);
     el.aarMenuButton.addEventListener("click", showMenu);
     el.endPhaseButton.addEventListener("click", endPhase);
@@ -1392,6 +1709,199 @@
       app.logExpanded = !app.logExpanded;
       drawLog();
     });
+  }
+
+  function onlineClientState() {
+    return app.online.runtime?.client?.getState?.() || null;
+  }
+
+  function onlineRoom() {
+    return onlineClientState()?.room || null;
+  }
+
+  function hasOnlineRoom() {
+    return Boolean(onlineRoom());
+  }
+
+  function isOnlineMatch() {
+    return ["active", "finished"].includes(onlineRoom()?.status);
+  }
+
+  function setOnlineSetupStatus(message = "", isError = false) {
+    el.onlineSetupStatus.textContent = message;
+    el.onlineSetupStatus.dataset.error = String(Boolean(isError));
+  }
+
+  function readRememberedOnlineRoom() {
+    try {
+      return sessionStorage.getItem(ONLINE_ROOM_SESSION_KEY) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function rememberOnlineRoom(roomCode) {
+    try {
+      if (roomCode) sessionStorage.setItem(ONLINE_ROOM_SESSION_KEY, roomCode);
+      else sessionStorage.removeItem(ONLINE_ROOM_SESSION_KEY);
+    } catch (error) {
+      console.warn("Unable to update online room session marker.", error);
+    }
+  }
+
+  function destroyOnlineRuntime() {
+    app.online.unsubscribe?.();
+    app.online.unsubscribe = null;
+    app.online.panel?.destroy?.();
+    app.online.panel = null;
+    app.online.runtime?.destroy?.();
+    app.online.runtime = null;
+    app.online.lastAppliedRevision = null;
+    app.online.submitting = false;
+    app.online.hadRoom = false;
+  }
+
+  function selectOnlineGameMode() {
+    app.online.selected = true;
+    el.onlineSetupPanel.hidden = false;
+    setMenuStatus("");
+    drawAiControls();
+    updateMenu();
+  }
+
+  async function connectOnlineTestServer() {
+    if (app.online.connecting) return;
+    if (hasOnlineRoom()) {
+      setOnlineSetupStatus("请先离开当前房间，再更换联机配置。", true);
+      return;
+    }
+    const projectUrl = el.onlineProjectUrlInput.value.trim();
+    const publishableKey = el.onlinePublishableKeyInput.value.trim();
+    if (!projectUrl || !publishableKey) {
+      setOnlineSetupStatus("请输入 Project URL 和 publishable key。", true);
+      return;
+    }
+
+    app.online.connecting = true;
+    el.onlineConnectButton.disabled = true;
+    setOnlineSetupStatus("正在建立匿名测试会话……");
+    destroyOnlineRuntime();
+    try {
+      const { transport, bridge, panel } = app.online.modules;
+      const sessionStore = transport.createSupabaseWebStorageSessionStore({
+        storage: window.sessionStorage,
+      });
+      const commandExecutor = bridge.createOnlineGameCommandExecutor({
+        core: app.core,
+        scenario: app.scenario,
+        rules: app.rules,
+        board: app.board,
+      });
+      app.online.runtime = await transport.createSupabaseOnlineRoomRuntime({
+        enabled: true,
+        projectUrl,
+        publishableKey,
+        sessionStore,
+        rulesetHash: app.online.rulesetHash,
+        commandExecutor,
+        pollIntervalMs: 1_000,
+        onPollError: (error) => setOnlineSetupStatus(`同步失败：${error.message}`, true),
+        onListenerError: (error) => console.error("Online room listener failed.", error),
+      });
+      app.online.unsubscribe = app.online.runtime.client.subscribe(handleOnlineClientState);
+      app.online.panel = panel.createOnlineMultiplayerPanel({
+        root: el.onlinePanelRoot,
+        client: app.online.runtime.client,
+        labels: {
+          title: "好友联机测试 / Friend Match",
+          create: "创建房间",
+          join: "加入房间",
+          ready: "准备",
+          notReady: "取消准备",
+          reconnect: "重新连接",
+          leave: "离开房间",
+        },
+        getInitialRoomState: async () => ({
+          state: bridge.projectOnlineAuthoritativeState(makeInitialState()),
+        }),
+        onError: (error) => setOnlineSetupStatus(`${error.code || "ONLINE_ERROR"}: ${error.message}`, true),
+      });
+      setOnlineSetupStatus("已连接测试服务器。可创建房间，或输入好友房间码加入。");
+      const rememberedRoom = readRememberedOnlineRoom();
+      if (rememberedRoom) {
+        try {
+          await app.online.runtime.client.reconnect({ roomCode: rememberedRoom });
+          setOnlineSetupStatus(`已恢复房间 ${rememberedRoom}。`);
+        } catch (error) {
+          rememberOnlineRoom(null);
+          setOnlineSetupStatus(`旧房间无法恢复：${error.message}`, true);
+        }
+      }
+    } catch (error) {
+      destroyOnlineRuntime();
+      setOnlineSetupStatus(`${error.code || "ONLINE_SETUP_FAILED"}: ${error.message}`, true);
+    } finally {
+      app.online.connecting = false;
+      el.onlineConnectButton.disabled = false;
+      updateMenu();
+    }
+  }
+
+  function handleOnlineClientState(clientState) {
+    const room = clientState.room;
+    if (!room) {
+      app.online.runtime?.stopPolling?.();
+      if (app.online.hadRoom) {
+        rememberOnlineRoom(null);
+        app.online.lastAppliedRevision = null;
+        if (el.body.dataset.view === "game") setView("menu");
+      }
+      app.online.hadRoom = false;
+      drawAiControls();
+      updateMenu();
+      return;
+    }
+
+    app.online.hadRoom = true;
+    rememberOnlineRoom(room.roomCode);
+    app.online.runtime?.startPolling?.({ immediate: true });
+    if (["active", "finished"].includes(room.status)) adoptOnlineRoomSnapshot(room);
+    if (["abandoned", "expired"].includes(room.status)) {
+      setOnlineSetupStatus(`房间 ${room.roomCode} 已${room.status === "abandoned" ? "中止" : "过期"}。`, true);
+      if (el.body.dataset.view === "game") setView("menu");
+    }
+  }
+
+  function adoptOnlineRoomSnapshot(room) {
+    if (app.online.lastAppliedRevision === room.revision) return;
+    const nextState = normalizeState(clone(room.authoritativeState), { preserveTransient: true });
+    nextState.selectedUnitId = null;
+    nextState.selectedDefenderId = null;
+    nextState.selectedAttackers = [];
+    nextState.log = [];
+    app.state = nextState;
+    app.online.lastAppliedRevision = room.revision;
+    app.ai.running = false;
+    app.ai.scheduled = false;
+    app.ai.waitingForHuman = false;
+    restoreInteractiveState();
+    showGame();
+  }
+
+  async function submitOnlineGameAction(action) {
+    const client = app.online.runtime?.client;
+    if (!client || !isOnlineMatch() || app.online.submitting) return;
+    app.online.submitting = true;
+    draw();
+    try {
+      await client.submitGameAction(action);
+      setOnlineSetupStatus("");
+    } catch (error) {
+      setOnlineSetupStatus(`${error.code || "ONLINE_ACTION_FAILED"}: ${error.message}`, true);
+    } finally {
+      app.online.submitting = false;
+      draw();
+    }
   }
 
   function setLanguage(lang) {
@@ -1415,6 +1925,13 @@
   }
 
   function setGameMode(mode) {
+    if (hasOnlineRoom()) {
+      setOnlineSetupStatus("请先离开当前联机房间，再切换离线模式。", true);
+      return;
+    }
+    destroyOnlineRuntime();
+    app.online.selected = false;
+    el.onlineSetupPanel.hidden = true;
     app.ai.mode = ["axis-vs-ai", "allied-vs-ai", "hotseat"].includes(mode) ? mode : "axis-vs-ai";
     app.ai.humanSide = humanSideForMode(app.ai.mode);
     app.ai.waitingForHuman = false;
@@ -1430,6 +1947,8 @@
     if (el.axisAiModeButton) el.axisAiModeButton.dataset.active = String(app.ai.mode === "axis-vs-ai");
     if (el.alliedAiModeButton) el.alliedAiModeButton.dataset.active = String(app.ai.mode === "allied-vs-ai");
     if (el.hotseatModeButton) el.hotseatModeButton.dataset.active = String(app.ai.mode === "hotseat");
+    if (el.onlineModeButton) el.onlineModeButton.dataset.active = String(app.online.selected);
+    el.onlineSetupPanel.hidden = !app.online.selected;
   }
 
   function setMenuStatus(text = "") {
@@ -1437,8 +1956,9 @@
   }
 
   function updateMenu() {
-    el.continueCampaignButton.disabled = !(localStorage.getItem(SESSION_KEY) || localStorage.getItem(CHECKPOINT_KEY));
-    el.menuLoadButton.disabled = !(localStorage.getItem(SAVE_KEY) || localStorage.getItem(LEGACY_SAVE_KEY));
+    el.startCampaignButton.disabled = app.online.selected;
+    el.continueCampaignButton.disabled = app.online.selected || !(localStorage.getItem(SESSION_KEY) || localStorage.getItem(CHECKPOINT_KEY));
+    el.menuLoadButton.disabled = app.online.selected || !(localStorage.getItem(SAVE_KEY) || localStorage.getItem(LEGACY_SAVE_KEY));
   }
 
   function setView(view) {
@@ -1448,24 +1968,29 @@
   }
 
   function showMenu() {
-    saveSessionState();
+    if (!isOnlineMatch()) saveSessionState();
     setView("menu");
     updateMenu();
   }
 
   function showGame() {
     setView("game");
-    checkAlliedBreakthroughVictory();
+    if (!isOnlineMatch()) checkAlliedBreakthroughVictory();
     draw();
   }
 
   function startNewCampaign() {
+    if (app.online.selected || hasOnlineRoom()) {
+      setOnlineSetupStatus("联机房间由准备状态启动；不会覆盖本地战役。", true);
+      return;
+    }
     localStorage.removeItem(SESSION_KEY);
     app.focusedBattleId = null;
     app.ai.running = false;
     app.ai.scheduled = false;
     app.ai.waitingForHuman = false;
     app.state = makeInitialState();
+    startHumanDemonstrationRecording();
     app.reachable.clear();
     app.legalRetreats.clear();
     app.legalRetreatSteps.clear();
@@ -1660,6 +2185,7 @@
   }
 
   function canUndoLastMove(unit = unitById(app.state.selectedUnitId)) {
+    if (isOnlineMatch()) return false;
     const move = app.state.lastMove;
     return Boolean(
       move
@@ -1741,9 +2267,22 @@
     const attackers = app.state.selectedAttackers.map(unitById).filter(Boolean);
     if (!defender || !attackers.length) return;
     if (attackers.some((attacker) => !canAttack(attacker, defender))) return;
+    if (isOnlineMatch()) {
+      void submitOnlineGameAction({
+        type: app.core.ENV_ACTION.DECLARE_COMBAT,
+        defenderId: defender.id,
+        attackerIds: attackers.map((unit) => unit.id),
+      });
+      return;
+    }
     const odds = calculateOdds(attackers, defender);
     const eventStateBefore = clone(app.state);
     const trainingEntry = combatTrainingEntry(attackers, defender, odds);
+    recordHumanDemonstrationDecision({
+      type: app.core.ENV_ACTION.DECLARE_COMBAT,
+      defenderId: defender.id,
+      attackerIds: attackers.map((unit) => unit.id),
+    }, eventStateBefore);
     const battle = {
       id: `b${Date.now()}-${app.state.declaredCombats.length}`,
       turn: app.state.turn,
@@ -1794,6 +2333,7 @@
   }
 
   function cancelDeclaredBattle(battleId) {
+    if (isOnlineMatch()) return;
     if (!isCombatPhase() || app.state.combatMode !== "declare") return;
     const battle = app.state.declaredCombats.find((item) => item.id === battleId);
     if (!battle) return;
@@ -1812,6 +2352,12 @@
 
   function finishDeclarations() {
     if (!isCombatPhase() || app.state.combatMode !== "declare") return;
+    if (isOnlineMatch()) {
+      void submitOnlineGameAction({ type: app.core.ENV_ACTION.FINISH_DECLARATIONS });
+      return;
+    }
+    const eventStateBefore = clone(app.state);
+    recordHumanDemonstrationDecision({ type: app.core.ENV_ACTION.FINISH_DECLARATIONS }, eventStateBefore);
     const aiPhase = isAiTurn();
     if (aiPhase) app.ai.waitingForHuman = false;
     app.state.combatMode = "resolve";
@@ -1858,6 +2404,16 @@
   function resolveNextBattle() {
     if (!isCombatPhase() || app.state.combatMode !== "resolve") return;
     if (app.state.retreatTask || app.state.advanceTask) return;
+    if (isOnlineMatch()) {
+      const battle = currentBattle();
+      if (!battle) return;
+      void submitOnlineGameAction({
+        type: app.core.ENV_ACTION.RESOLVE_COMBAT,
+        battleId: battle.id,
+        dieRoll: app.online.modules.bridge.rollOnlineFriendDie(),
+      });
+      return;
+    }
     const aiPhase = isAiTurn();
     if (aiPhase) app.ai.waitingForHuman = false;
     const battle = currentBattle();
@@ -2099,9 +2655,26 @@
     const unit = unitById(task.unitIds[task.index]);
     if (!unit) return;
     const path = app.retreatPaths.get(hexId);
+    if (isOnlineMatch()) {
+      await submitOnlineGameAction({
+        type: app.core.ENV_ACTION.RETREAT_UNIT,
+        unitId: unit.id,
+        toHexId: hexId,
+        route: { path: path.slice(), remaining: 0 },
+        battleId: task.battleId || null,
+      });
+      return;
+    }
     const eventStateBefore = clone(app.state);
     const fromHexId = unit.hexId;
     const trainingEntry = retreatTrainingEntry(unit, hexId, path);
+    recordHumanDemonstrationDecision({
+      type: app.core.ENV_ACTION.RETREAT_UNIT,
+      unitId: unit.id,
+      toHexId: hexId,
+      route: { path: path.slice(), remaining: 0 },
+      battleId: task.battleId || null,
+    }, eventStateBefore, { side: retreatControllerSide() });
     app.legalRetreats.clear();
     app.legalRetreatSteps.clear();
     app.retreatPaths.clear();
@@ -2164,8 +2737,21 @@
 
   async function advanceUnit(unitId) {
     const task = app.state.advanceTask;
+    if (isOnlineMatch()) {
+      if (!task) return;
+      await submitOnlineGameAction(unitId === "skip"
+        ? { type: app.core.ENV_ACTION.SKIP_ADVANCE, battleId: task.battleId, targetHexId: task.targetHexId }
+        : { type: app.core.ENV_ACTION.ADVANCE_UNIT, unitId, battleId: task.battleId, targetHexId: task.targetHexId });
+      return;
+    }
     const eventStateBefore = clone(app.state);
     const trainingEntry = advanceTrainingEntry(unitId);
+    recordHumanDemonstrationDecision(
+      unitId === "skip"
+        ? { type: app.core.ENV_ACTION.SKIP_ADVANCE, battleId: task?.battleId, targetHexId: task?.targetHexId }
+        : { type: app.core.ENV_ACTION.ADVANCE_UNIT, unitId, battleId: task?.battleId, targetHexId: task?.targetHexId },
+      eventStateBefore,
+    );
     if (!task || unitId === "skip") {
       recordTrainingEntry(trainingEntry);
       app.state.advanceTask = null;
@@ -2266,9 +2852,26 @@
     }
     const fromHexId = unit.hexId;
     const path = route.path || [fromHexId, destinationHexId];
+    if (isOnlineMatch()) {
+      await submitOnlineGameAction({
+        type: app.core.ENV_ACTION.MOVE_UNIT,
+        unitId: unit.id,
+        fromHexId,
+        toHexId: destinationHexId,
+        route: clone(route),
+      });
+      return;
+    }
     const movedUnitsBefore = app.state.movedUnits.slice();
     const eventStateBefore = clone(app.state);
     const trainingEntry = movementTrainingEntry(unit, fromHexId, destinationHexId, route, app.reachable);
+    recordHumanDemonstrationDecision({
+      type: app.core.ENV_ACTION.MOVE_UNIT,
+      unitId: unit.id,
+      fromHexId,
+      toHexId: destinationHexId,
+      route: clone(route),
+    }, eventStateBefore);
     app.reachable.clear();
     await animateUnitPath(unit, path);
     unit.hexId = destinationHexId;
@@ -2388,6 +2991,7 @@
   }
 
   function isAiSide(side) {
+    if (isOnlineMatch()) return false;
     return Boolean(app.ai.mode !== "hotseat" && side && side !== app.ai.humanSide);
   }
 
@@ -2412,10 +3016,22 @@
   }
 
   function isHumanInputBlocked() {
+    if (isOnlineMatch()) {
+      const clientState = onlineClientState();
+      const room = clientState?.room;
+      return Boolean(
+        room?.status !== "active"
+        || clientState?.connection !== "connected"
+        || clientState?.operation
+        || app.online.submitting
+        || clientState?.playerSide !== room?.activeSide
+      );
+    }
     return Boolean(app.ai.running || isAiTurn() || hasAiControlledTask());
   }
 
   function scheduleAiTurn() {
+    if (isOnlineMatch()) return;
     if (!app.state || app.state.winner || app.ai.running || app.ai.scheduled) return;
     if (el.body.dataset.view !== "game") return;
     if (app.ai.waitingForHuman && !hasAiControlledTask()) return;
@@ -5211,6 +5827,16 @@
 
   function endPhase() {
     if (app.state.winner) return;
+    if (app.phaseFlow.shouldConfirmEmptyMovementPhaseEnd({
+      phase: phase(),
+      movedUnits: app.state.movedUnits,
+    }) && !window.confirm(tr("ui.confirmEmptyMovementPhaseEnd"))) {
+      return;
+    }
+    if (isOnlineMatch()) {
+      void submitOnlineGameAction({ type: app.core.ENV_ACTION.END_PHASE });
+      return;
+    }
     if (app.state.retreatTask || app.state.advanceTask) {
       log(tr("text.retreatPrompt", { unit: "" }));
       draw();
@@ -5224,12 +5850,6 @@
     if (isCombatPhase() && app.state.combatMode === "declare" && app.state.declaredCombats.length) {
       log(tr("ui.finishDeclarations"));
       draw();
-      return;
-    }
-    if (app.phaseFlow.shouldConfirmEmptyMovementPhaseEnd({
-      phase: phase(),
-      movedUnits: app.state.movedUnits,
-    }) && !window.confirm(tr("ui.confirmEmptyMovementPhaseEnd"))) {
       return;
     }
     const eventStateBefore = clone(app.state);
@@ -5361,6 +5981,7 @@
 
   function setWinner(side, reason, type = null) {
     app.state.winner = { side, reason, type, turn: app.state.turn, report: buildAarData(side, reason, type) };
+    completeHumanDemonstrationRecording();
     log(`${sideLabel(side)}: ${reason}`);
     openAar(true);
   }
@@ -5664,24 +6285,33 @@
     const turn = app.rules.turns[app.state.turn - 1];
     el.turnLabel.textContent = `${turnLabel(turn)} · ${sideLabel(activeSide())}`;
     el.phaseLabel.textContent = phaseLabel(phase().id);
-    el.aiStatus.dataset.active = String(app.ai.mode !== "hotseat" && (app.ai.running || isAiTurn() || hasAiControlledTask()));
-    el.aiStatus.textContent = app.ai.mode === "hotseat"
+    const onlineState = onlineClientState();
+    const room = onlineState?.room;
+    el.aiStatus.dataset.active = String(!isOnlineMatch() && app.ai.mode !== "hotseat" && (app.ai.running || isAiTurn() || hasAiControlledTask()));
+    el.aiStatus.textContent = isOnlineMatch() || app.ai.mode === "hotseat"
       ? ""
       : app.ai.waitingForHuman && isAiTurn()
         ? tr("ui.aiAwaitingInput")
         : app.ai.running || isAiTurn()
         ? tr("ui.aiThinking", { side: sideLabel(activeSide()) })
         : tr("ui.aiWaiting", { side: sideLabel(app.ai.humanSide), enemy: sideLabel(enemySide(app.ai.humanSide)) });
+    el.onlineGameStatus.hidden = !isOnlineMatch();
+    el.onlineGameStatus.textContent = isOnlineMatch()
+      ? `房间 ${room.roomCode} · 你是 ${sideLabel(onlineState.playerSide)} · revision ${room.revision} · ${isHumanInputBlocked() ? "等待对方或同步" : "轮到你行动"}`
+      : "";
     el.boardBadge.textContent = boardBadgeText();
     el.finishDeclarationsButton.hidden = !(isCombatPhase() && app.state.combatMode === "declare");
     el.resolveBattleButton.hidden = !(isCombatPhase() && app.state.combatMode === "resolve");
     el.endPhaseButton.hidden = isCombatPhase() && app.state.combatMode === "declare";
     const pendingBattle = isCombatPhase() && app.state.combatMode === "resolve" ? currentBattle() : null;
-    const blockInput = app.ai.running || hasAiControlledTask();
+    const blockInput = isOnlineMatch() ? isHumanInputBlocked() : app.ai.running || hasAiControlledTask();
     el.resolveBattleButton.disabled = Boolean(app.state.winner || blockInput || app.state.retreatTask || app.state.advanceTask || !pendingBattle);
     el.resolveBattleButton.textContent = pendingBattle ? tr("ui.resolveBattle") : tr("ui.done");
     el.finishDeclarationsButton.disabled = Boolean(app.state.winner || blockInput);
     el.endPhaseButton.disabled = Boolean(app.state.winner || blockInput);
+    el.newGameButton.disabled = isOnlineMatch();
+    el.saveButton.disabled = isOnlineMatch();
+    el.loadButton.disabled = isOnlineMatch();
     if (app.state.winner) {
       el.winnerBanner.hidden = false;
       el.winnerBanner.textContent = `${sideLabel(app.state.winner.side)} · ${app.state.winner.reason}`;
@@ -6022,24 +6652,49 @@
   }
 
   function appendAlphaAssessmentCard() {
+    if (app.ai.mode === "hotseat") return;
     const summary = app.aiAlpha?.lastSummary;
+    const snapshot = app.aiAlphaGameAdapter?.lastSnapshot;
     const bestAction = currentAlphaBestAction();
     if (!summary || !bestAction) {
+      if (appendAlphaAdapterStatusCard(snapshot, summary)) return;
       appendAlphaModelStatusCard();
       return;
     }
     const details = [
       `${sideLabel(summary.side)} ${phaseLabel(summary.phaseId || phase().id)} value ${formatSignedNumber(summary.rootValue)}`,
       `Best now: ${alphaActionLabel(bestAction)}`,
+      alphaAdapterStatusLine(snapshot),
+      alphaAdapterSelectionLine(snapshot),
+      alphaRecommendationLine(summary.recommendation),
       alphaCandidateLine(summary.candidateLines),
       `Search: ${summary.search.iterations} iters / ${summary.search.rootChildren} choices${summary.cache?.hit ? " / cached" : ""}`,
       alphaProgressLine(summary.progress),
       alphaModelEvidenceLine(summary.model),
+      alphaExplanationLine(summary.explanation),
       alphaFeatureLine(summary.features),
     ].filter(Boolean).join("\n");
     const card = operationCard("Alpha Analysis", details, alphaAssessmentSeverity(summary.rootValue));
     card.classList.add("alpha-assessment-card");
     el.operationsFocus.append(card);
+  }
+
+  function appendAlphaAdapterStatusCard(snapshot, summary = app.aiAlpha?.lastSummary) {
+    if (!snapshot || snapshot.model?.ok === false) return false;
+    const status = snapshot.status || "idle";
+    if (status === "ready" && snapshot.action?.canApply) return false;
+    const details = [
+      alphaAdapterStatusLine(snapshot) || `Status: ${alphaAdapterStatusLabel(status)}`,
+      snapshot.reason ? `Reason: ${alphaModelStatusLabel(snapshot.reason)}` : "",
+      summary?.stateHash ? `Last: ${sideLabel(summary.side)} ${phaseLabel(summary.phaseId || phase().id)} value ${formatSignedNumber(summary.rootValue)}` : "",
+      snapshot.scheduler?.inFlight ? "Search: in flight" : "",
+      snapshot.scheduler?.scheduled ? "Search: queued" : "",
+      snapshot.scheduler?.discardedResults ? `Discarded stale: ${snapshot.scheduler.discardedResults}` : "",
+    ].filter(Boolean).join("\n");
+    const card = operationCard("Alpha Analysis", details, status === "stale" ? "danger" : "");
+    card.classList.add("alpha-assessment-card");
+    el.operationsFocus.append(card);
+    return true;
   }
 
   function appendAlphaModelStatusCard() {
@@ -6056,24 +6711,41 @@
   }
 
   function alphaModelStatusLabel(reason) {
+    return app.aiAlphaBrowser?.alphaModelStatusReasonLabel?.(reason) || String(reason || "unavailable");
+  }
+
+  function alphaAdapterStatusLine(snapshot) {
+    if (!snapshot?.status) return "";
+    if (snapshot.status === "ready" && snapshot.action?.canApply) return "";
+    return `Status: ${alphaAdapterStatusLabel(snapshot.status)}`;
+  }
+
+  function alphaAdapterStatusLabel(status) {
     const labels = {
-      invalid_alpha_model: "waiting for released model",
-      missing_release_metadata: "missing release gate",
-      missing_training_data_evidence: "missing training evidence",
-      missing_decision_evidence: "missing decision evidence",
-      missing_model_environment: "missing environment fingerprint",
-      model_environment_mismatch: "environment mismatch",
-      missing_model_feature_contract: "missing feature contract",
-      model_feature_contract_mismatch: "feature contract mismatch",
-      insufficient_evaluation_suite: "evaluation suite too small",
+      pending: "analysis pending",
+      refreshing: "refreshing",
+      stale: "stale result",
+      idle: "idle",
+      analysis_only: "analysis only",
+      model_untrusted: "model untrusted",
+      ready: "ready",
     };
-    return labels[reason] || String(reason || "unavailable");
+    return labels[status] || String(status || "unavailable");
+  }
+
+  function alphaAdapterSelectionLine(snapshot) {
+    if (!isAlphaAdapterSnapshotCurrent(snapshot) || !snapshot?.legalSelection?.selectedSource) return "";
+    const source = snapshot.legalSelection.selectedSource;
+    if (source === "direct") return "";
+    const skipped = Number(snapshot.legalSelection.illegalCandidateCount || 0);
+    return `Selected legal candidate: ${source}${skipped ? ` / skipped ${skipped}` : ""}`;
   }
 
   function alphaModelEvidenceLine(model) {
     if (!model) return "";
     const items = [];
-    if (model.sourceHash) items.push(`source ${shortAlphaHash(model.sourceHash)}`);
+    const source = alphaModelSourceLine(model);
+    if (source) items.push(source);
     if (model.trainingSamples !== null && model.trainingSamples !== undefined) items.push(`train ${model.trainingSamples}`);
     if (model.reanalysisSamples !== null && model.reanalysisSamples !== undefined) items.push(`reanalyzed ${model.reanalysisSamples}`);
     if (model.stateSnapshots !== null && model.stateSnapshots !== undefined) items.push(`snapshots ${model.stateSnapshots}`);
@@ -6091,8 +6763,54 @@
       items.push(`features ${model.featureContractMatches === true ? "ok" : model.featureContractMatches === false ? "mismatch" : "unknown"}`);
     }
     if (model.analyzedActions !== null && model.analyzedActions !== undefined) items.push(`analyzed ${model.analyzedActions}`);
+    const selectedShare = alphaPercent(model.selectedActionShare);
+    const fallbackRate = alphaPercent(alphaFallbackRate(model));
+    if (selectedShare || fallbackRate) items.push(`search ${selectedShare ? `selected ${selectedShare}` : ""}${selectedShare && fallbackRate ? " / " : ""}${fallbackRate ? `fallback ${fallbackRate}` : ""}`);
+    const confidence = alphaPercent(model.averageRecommendationConfidence);
+    const uncertainty = alphaPercent(model.averageRecommendationUncertainty);
+    if (confidence || uncertainty) items.push(`decisions ${confidence || "--"} conf${uncertainty ? ` / ${uncertainty} uncertain` : ""}`);
+    const minConfidence = alphaPercent(model.minDecisionAverageRecommendationConfidence);
+    const maxUncertainty = alphaPercent(model.maxDecisionAverageRecommendationUncertainty);
+    const minSelected = alphaPercent(model.minDecisionSelectedActionShare);
+    const maxFallback = alphaPercent(model.maxDecisionFallbackRate);
+    if (minConfidence || maxUncertainty || minSelected || maxFallback) {
+      const gates = [];
+      if (minConfidence) gates.push(`conf>=${minConfidence}`);
+      if (maxUncertainty) gates.push(`unc<=${maxUncertainty}`);
+      if (minSelected) gates.push(`sel>=${minSelected}`);
+      if (maxFallback) gates.push(`fb<=${maxFallback}`);
+      items.push(`gate ${gates.join(" ")}`);
+    }
     if (model.runtimeTarget) items.push(`runtime ${model.runtimeInstallApproved ? "approved" : "unapproved"}`);
     return items.length ? `Model: ${items.join(" / ")}` : "";
+  }
+
+  function alphaFallbackRate(model) {
+    const decisions = Number(model?.decisionCount || 0);
+    if (!(decisions > 0)) return null;
+    return Number(model?.fallbackActions || 0) / decisions;
+  }
+
+  function alphaModelSourceLine(model) {
+    if (!model) return "";
+    const bits = [];
+    if (model.sourceSchema) {
+      const sourceKind = String(model.sourceSchema).includes("ladder") ? "ladder" : String(model.sourceSchema).includes("cycle") ? "cycle" : "model";
+      bits.push(sourceKind);
+    }
+    if (model.activeGeneration !== null && model.activeGeneration !== undefined) bits.push(`gen ${model.activeGeneration}`);
+    if (model.sourceHash) bits.push(shortAlphaHash(model.sourceHash));
+    const evalBits = [];
+    if (model.evaluationSuiteGames !== null && model.evaluationSuiteGames !== undefined) evalBits.push(`${model.evaluationSuiteGames}g`);
+    if (model.evaluationSuiteSides !== null && model.evaluationSuiteSides !== undefined) evalBits.push(`${model.evaluationSuiteSides}s`);
+    if (model.evaluationSuiteChallengePositions !== null && model.evaluationSuiteChallengePositions !== undefined) evalBits.push(`c${model.evaluationSuiteChallengePositions}`);
+    if (evalBits.length) bits.push(`eval ${evalBits.join("/")}`);
+    return bits.length ? `source ${bits.join(" ")}` : "";
+  }
+
+  function alphaPercent(value) {
+    const next = Number(value);
+    return Number.isFinite(next) ? `${Math.round(next * 100)}%` : "";
   }
 
   function shortAlphaHash(value) {
@@ -6107,6 +6825,26 @@
       return `${index + 1}. ${label} ${share} q ${formatSignedNumber(line.q)}`;
     });
     return items.length ? `Lines: ${items.join(" | ")}` : "";
+  }
+
+  function alphaRecommendationLine(recommendation) {
+    if (!recommendation) return "";
+    const confidence = Math.round(Number(recommendation.confidence || 0) * 100);
+    const margin = Math.round(Number(recommendation.visitMargin || 0) * 100);
+    const qMargin = recommendation.qMargin === null || recommendation.qMargin === undefined
+      ? ""
+      : ` / q ${formatSignedNumber(recommendation.qMargin)}`;
+    return `Confidence: ${alphaRecommendationLabel(recommendation.label)} ${confidence}% / margin ${margin}pp${qMargin}`;
+  }
+
+  function alphaRecommendationLabel(label) {
+    const labels = {
+      forced: "forced",
+      strong: "strong",
+      stable: "stable",
+      contested: "contested",
+    };
+    return labels[label] || "unknown";
   }
 
   function alphaProgressLine(progress = []) {
@@ -6135,6 +6873,22 @@
     return items.length ? `Signals: ${items.join(", ")}` : "";
   }
 
+  function alphaExplanationLine(explanation) {
+    const valueItems = alphaContributionItems(explanation?.value?.entries, 2);
+    const policyItems = alphaContributionItems(explanation?.policy?.entries, 2);
+    const items = [];
+    if (valueItems.length) items.push(`value ${valueItems.join(", ")}`);
+    if (policyItems.length) items.push(`policy ${policyItems.join(", ")}`);
+    return items.length ? `Why: ${items.join(" / ")}` : "";
+  }
+
+  function alphaContributionItems(entries = [], limit = 2) {
+    return entries.slice(0, limit).map((entry) => {
+      const sign = Number(entry.contribution || 0) >= 0 ? "+" : "";
+      return `${alphaFeatureLabel(entry.key)} ${sign}${Number(entry.contribution || 0).toFixed(2)}`;
+    });
+  }
+
   function alphaFeatureLabel(key) {
     const labels = {
       materialBalance: "material",
@@ -6149,6 +6903,23 @@
       friendlyThreats: "friendly threats",
       enemyThreats: "enemy threats",
       axisObjectiveHeld: "objective held",
+      move: "move",
+      declareCombat: "combat",
+      endPhase: "end phase",
+      routeRemaining: "remaining mp",
+      routeSpent: "spent mp",
+      attackerCount: "attackers",
+      axisObjectiveDestination: "objective hex",
+      alliedExitDestination: "exit hex",
+      moveWithAxisObjectivePressure: "move pressure",
+      moveWithAxisObjectiveProgress: "move progress",
+      moveWithAxisObjectiveLocalAdvantage: "move local force",
+      combatWithFriendlyThreats: "combat threat",
+      combatWithEnemyThreats: "enemy threat",
+      combatWithAxisObjectiveLocalAdvantage: "combat local force",
+      advanceWithAxisObjectivePressure: "advance pressure",
+      advanceWithAxisObjectiveLocalAdvantage: "advance local force",
+      endPhaseWithEnemyThreats: "end under threat",
     };
     return labels[key] || String(key || "--");
   }
@@ -6177,22 +6948,35 @@
     if (!app.state) return;
     const count = app.training.entries.length;
     const eventCount = app.training.events.length;
-    const card = operationCard("AI Training", `${count} preference samples\n${eventCount} replay events`, count || eventCount ? "good" : "");
-    card.classList.add("training-record-card");
+    const card = document.createElement("details");
+    card.className = "operation-card training-record-card";
+    if (count || eventCount) card.dataset.severity = "good";
+
+    const summary = document.createElement("summary");
+    summary.textContent = tr("ui.trainingData");
+    card.append(summary);
+
+    const content = document.createElement("div");
+    content.className = "training-record-content";
+    content.append(
+      line(tr("ui.preferenceSamples", { count })),
+      line(tr("ui.replayEvents", { count: eventCount })),
+    );
     const actions = document.createElement("div");
     actions.className = "training-actions";
     const exportButton = document.createElement("button");
     exportButton.type = "button";
-    exportButton.textContent = "Export JSON";
+    exportButton.textContent = tr("ui.exportJson");
     exportButton.disabled = count <= 0 && eventCount <= 0;
     exportButton.addEventListener("click", exportTrainingEntries);
     const clearButton = document.createElement("button");
     clearButton.type = "button";
-    clearButton.textContent = "Clear";
+    clearButton.textContent = tr("ui.clearTrainingData");
     clearButton.disabled = count <= 0 && eventCount <= 0;
     clearButton.addEventListener("click", clearTrainingEntries);
     actions.append(exportButton, clearButton);
-    card.append(actions);
+    content.append(actions);
+    card.append(content);
     el.operationsFocus.append(card);
   }
 
@@ -6329,6 +7113,8 @@
     cancel.className = "battle-cancel-button";
     cancel.textContent = "X";
     cancel.title = tr("text.cancel");
+    cancel.hidden = isOnlineMatch();
+    cancel.disabled = isOnlineMatch();
     cancel.addEventListener("click", (event) => {
       event.stopPropagation();
       cancelDeclaredBattle(battle.id);

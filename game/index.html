@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>阿拉曼战役 / El Alamein</title>
-    <link rel="stylesheet" href="style.css?v=20260708-allied-breakthrough-1" />
+    <link rel="stylesheet" href="style.css?v=20260714-online-friend-playtest-1" />
   </head>
   <body data-view="menu" data-lang="zh">
     <section id="menuView" class="menu-view" aria-label="Main menu">
@@ -32,7 +32,31 @@
               <span data-i18n="side.axis">Axis</span>
             </button>
             <button id="hotseatModeButton" type="button" data-game-mode="hotseat" data-i18n="menu.hotseatMode">Hotseat</button>
+            <button id="onlineModeButton" type="button" data-game-mode="online">好友联机测试 / Friend Match</button>
           </div>
+        </section>
+        <section id="onlineSetupPanel" class="online-setup" aria-label="Online friend match setup" hidden>
+          <div class="online-setup-guide" aria-label="好友联机步骤">
+            <strong>好友联机步骤</strong>
+            <ol>
+              <li>两位玩家都打开这个联机测试版，并选择“好友联机测试”。</li>
+              <li>双方输入相同的 Project URL 和 publishable key，然后连接测试服务器。</li>
+              <li>房主选阵营并创建房间，把房间码发给好友；好友选另一阵营并加入。</li>
+              <li>双方都点“准备”，对局会自动开始。轮到自己的阵营时才能操作。</li>
+            </ol>
+          </div>
+          <p class="online-setup-note">配置只保留在当前浏览器标签页的临时会话中，不写入游戏存档。</p>
+          <label>
+            <span>Supabase Project URL</span>
+            <input id="onlineProjectUrlInput" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://project-ref.supabase.co" />
+          </label>
+          <label>
+            <span>Publishable key（不要使用 secret/service-role key）</span>
+            <input id="onlinePublishableKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="sb_publishable_..." />
+          </label>
+          <button id="onlineConnectButton" type="button">连接测试服务器</button>
+          <p id="onlineSetupStatus" class="online-setup-status" role="status"></p>
+          <div id="onlinePanelRoot"></div>
         </section>
         <div class="menu-actions">
           <button id="startCampaignButton" type="button" data-i18n="menu.start">开始战役</button>
@@ -45,8 +69,7 @@
 
     <section id="gameView" class="game-view" aria-label="El Alamein game">
       <header class="topbar">
-        <div class="aar-header">
-          <p class="eyebrow" data-i18n="ui.eyebrow">Local Hotseat Wargame</p>
+        <div class="game-title">
           <h1 data-i18n="app.title">阿拉曼战役</h1>
         </div>
         <nav class="actions" aria-label="Game actions">
@@ -56,6 +79,7 @@
           <button id="loadButton" type="button" data-i18n="ui.load">读取</button>
           <button id="chartsButton" type="button" data-i18n="ui.charts">表格</button>
           <button id="aarButton" type="button" data-i18n="ui.aar">战报</button>
+          <button id="exportHumanDemonstrationButton" type="button" data-i18n="ui.exportHumanDemonstration">Export human demonstrations</button>
         </nav>
       </header>
 
@@ -78,6 +102,7 @@
               <span id="phaseLabel">--</span>
             </div>
             <div id="aiStatus" class="ai-status"></div>
+            <div id="onlineGameStatus" class="online-game-status" hidden></div>
             <div id="winnerBanner" class="winner-banner" hidden></div>
             <div class="phase-actions">
               <button id="finishDeclarationsButton" type="button" hidden data-i18n="ui.finishDeclarations">完成宣告</button>
@@ -159,6 +184,6 @@
       </div>
     </template>
 
-    <script src="game.js?v=20260709-aar-casualty-alpha-ai-6" defer></script>
+    <script src="game.js?v=20260714-online-friend-playtest-4" defer></script>
   </body>
 </html>

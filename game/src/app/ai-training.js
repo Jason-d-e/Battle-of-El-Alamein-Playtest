@@ -50,6 +50,7 @@ export function summarizeTrainingEntries(entries) {
 
 export function summarizeTrainingEvents(events) {
   const normalized = Array.isArray(events) ? events : [];
+  const alphaRecommendationEvents = normalized.filter((event) => event.type === "ALPHA_ACTION_RECOMMENDED");
   return {
     events: normalized.length,
     types: countBy(normalized, (event) => event.type || "unknown"),
@@ -59,7 +60,49 @@ export function summarizeTrainingEvents(events) {
     legalActionCoverage: coverage(normalized, (event) => Array.isArray(event.legalActionsBefore) && Array.isArray(event.legalActionsAfter)),
     metricCoverage: coverage(normalized, (event) => event.metricsAfter),
     diceEvents: normalized.filter((event) => event.dieRoll !== undefined || event.roll !== undefined).length,
+    alphaRecommendations: summarizeAlphaRecommendationEvents(alphaRecommendationEvents),
     missingReplayFields: replaySchemaGaps(normalized),
+  };
+}
+
+export function summarizeAlphaRecommendationEvents(events) {
+  const normalized = Array.isArray(events) ? events : [];
+  const payloads = normalized.map(alphaRecommendationPayload);
+  const okEvents = normalized.filter((event, index) => Boolean(event.recommendationOk ?? payloads[index]?.ok));
+  const illegalCandidateCounts = payloads
+    .map((payload) => Number(payload?.legalSelection?.illegalCandidateCount ?? 0))
+    .filter(Number.isFinite);
+  const confidences = payloads
+    .map((payload) => Number(payload?.snapshot?.action?.confidence ?? payload?.snapshot?.analysis?.recommendation?.confidence))
+    .filter(Number.isFinite);
+  const rootValues = payloads
+    .map((payload) => Number(payload?.snapshot?.analysis?.rootValue))
+    .filter(Number.isFinite);
+  return {
+    events: normalized.length,
+    ok: okEvents.length,
+    rejected: normalized.length - okEvents.length,
+    okRate: normalized.length ? round(okEvents.length / normalized.length, 4) : null,
+    reasons: countBy(normalized, (event, index) => event.recommendationReason || payloads[index]?.reason || (payloads[index]?.ok ? "ok" : "unknown")),
+    actionTypes: countBy(payloads, (payload) => payload?.action?.type || "none"),
+    phases: countBy(normalized, (event) => event.phaseId || "unknown"),
+    sides: countBy(normalized, (event, index) => event.side || payloads[index]?.context?.side || "unknown"),
+    snapshotStatuses: countBy(payloads, (payload) => payload?.snapshot?.status || "none"),
+    selectedSources: countBy(payloads, (payload) => payload?.legalSelection?.selectedSource || "none"),
+    candidateFallbacks: payloads.filter((payload) => {
+      const source = payload?.legalSelection?.selectedSource;
+      return source && source !== "direct";
+    }).length,
+    illegalCandidatesSkipped: illegalCandidateCounts.reduce((sum, count) => sum + count, 0),
+    averageIllegalCandidatesSkipped: average(illegalCandidateCounts),
+    averageConfidence: average(confidences),
+    averageRootValue: average(rootValues),
+    actionCoverage: coverage(payloads, (payload) => payload?.action?.type),
+    legalSelectionCoverage: coverage(payloads, (payload) => payload?.legalSelection),
+    snapshotCoverage: coverage(payloads, (payload) => payload?.snapshot),
+    awarenessCoverage: coverage(payloads, (payload) => payload?.snapshot?.analysis?.awareness),
+    searchCoverage: coverage(payloads, (payload) => payload?.snapshot?.analysis?.search),
+    trustedModelCoverage: coverage(payloads, (payload) => payload?.snapshot?.model?.ok === true),
   };
 }
 
@@ -196,6 +239,11 @@ export function choiceKey(choice) {
   return JSON.stringify(choice);
 }
 
+function alphaRecommendationPayload(event) {
+  if (event?.alpha && typeof event.alpha === "object" && !Array.isArray(event.alpha)) return event.alpha;
+  return event && typeof event === "object" && !Array.isArray(event) ? event : {};
+}
+
 function compactChoice(choice) {
   if (!choice) return null;
   const compact = {};
@@ -218,8 +266,8 @@ function movementTopRate(entries, limit) {
 }
 
 function countBy(entries, selector) {
-  return entries.reduce((counts, entry) => {
-    const key = selector(entry);
+  return entries.reduce((counts, entry, index) => {
+    const key = selector(entry, index);
     counts[key] = (counts[key] || 0) + 1;
     return counts;
   }, {});

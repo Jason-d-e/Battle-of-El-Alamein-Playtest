@@ -642,10 +642,18 @@ function applyEndPhaseAction(environment) {
   const state = environment.state;
   if (!canEndPhase(environment)) return { ok: false, reason: "phase_has_pending_work" };
   const endedPhase = currentPhase(environment);
+  const phaseVictory = endedPhase?.type === "movement" && endedPhase.side === "allied"
+    ? evaluateEnvironmentVictory(environment)
+    : null;
   if (endedPhase?.type === "combat") recoverSide(state, endedPhase.side);
   clearPhaseState(state);
   const events = [{ type: ENV_EVENT.PHASE_ENDED, phaseId: endedPhase?.id || null, turn: state.turn }];
   const fullTurnEnd = shouldCheckAxisObjectiveVictoryAtPhaseEnd({ phaseIndex: state.phaseIndex, phases: environment.rules.phases });
+  if (phaseVictory) {
+    state.winner = phaseVictory;
+    events.push({ type: ENV_EVENT.GAME_ENDED, winner: cloneGameState(state.winner) });
+    return { ok: true, events };
+  }
   if (fullTurnEnd) {
     const axisVictory = evaluateAxisObjectiveVictory(environmentContext(environment));
     if (axisVictory) {
@@ -662,12 +670,6 @@ function applyEndPhaseAction(environment) {
     state.phaseIndex = 0;
   } else {
     state.phaseIndex += 1;
-    const alliedBreakthrough = evaluateEnvironmentVictory(environment);
-    if (alliedBreakthrough) {
-      state.winner = alliedBreakthrough;
-      events.push({ type: ENV_EVENT.GAME_ENDED, winner: cloneGameState(state.winner) });
-      return { ok: true, events };
-    }
   }
   events.push({ type: ENV_EVENT.PHASE_STARTED, phaseId: currentPhase(environment)?.id || null, turn: state.turn });
   return { ok: true, events };

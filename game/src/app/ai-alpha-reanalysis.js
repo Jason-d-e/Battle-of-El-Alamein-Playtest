@@ -5,6 +5,7 @@ import {
   stateHash,
 } from "../core/index.js";
 import {
+  actionKey,
   analyzePosition,
   makeSearchTrainingSample,
 } from "./ai-alpha-search.js";
@@ -13,18 +14,19 @@ import {
   selectAlphaReplaySamples,
 } from "./ai-alpha-replay-buffer.js";
 import { flattenAlphaSelfPlaySamples } from "./ai-alpha-training.js";
+import { normalizeTrajectoryIds } from "../../../shared/wargame-alpha/trajectory-lineage.js";
 
 export const ALPHA_REANALYSIS_BATCH_SCHEMA = "zizi-el-alamein-alpha-reanalysis-batch-v1";
 export const ALPHA_REANALYSIS_SAMPLE_METADATA_SCHEMA = "zizi-el-alamein-alpha-reanalysis-sample-v1";
 
 export function alphaReanalysisSamplesFromInputs(inputs = []) {
   return (inputs || [])
-    .flatMap((input) => (
-      input?.schema === "zizi-el-alamein-alpha-replay-buffer-v1"
-        ? samplesFromAlphaReplayBuffer(input)
-        : flattenAlphaSelfPlaySamples([input])
-    ))
+    .flatMap((input) => samplesFromReanalysisInput(input))
     .filter((sample) => sample?.schema === "zizi-el-alamein-alpha-training-sample-v1")
+    .map((sample) => {
+      normalizeTrajectoryIds(sample.trajectoryIds);
+      return sample;
+    })
     .filter((sample) => sample.initialState && typeof sample.initialState === "object" && !Array.isArray(sample.initialState));
 }
 
@@ -38,6 +40,7 @@ export function runAlphaReanalysisBatch(options = {}) {
   const maxSamples = Math.max(0, Math.floor(Number(options.maxSamples ?? 16)));
   const selectedSamples = selectAlphaReplaySamples(sourceSamples, {
     maxSamples,
+    sides: options.sides || options.side,
     balanceBy: options.balanceBy || "none",
     priorityBy: options.priorityBy || "policyEntropy",
   });
@@ -67,21 +70,74 @@ export function runAlphaReanalysisBatch(options = {}) {
     }
   }
 
+  return buildAlphaReanalysisBatchArtifact({
+    generatedAt: options.generatedAt,
+    seed: options.seed,
+    inputCount: Array.isArray(options.inputs) ? options.inputs.length : 0,
+    eligibleSamples: sourceSamples.length,
+    selectedSamples: selectedSamples.length,
+    maxSamples,
+    sides: options.sides || options.side,
+    balanceBy: options.balanceBy || "none",
+    priorityBy: options.priorityBy || "policyEntropy",
+    includeStateSnapshots: options.includeStateSnapshots !== false,
+    searchOptions: options.searchOptions || {},
+    errors,
+    samples,
+  });
+}
+
+export function buildAlphaReanalysisBatchArtifact(options = {}) {
+  const samples = Array.isArray(options.samples) ? options.samples : [];
+  const errors = Array.isArray(options.errors) ? options.errors : [];
   return {
     schema: ALPHA_REANALYSIS_BATCH_SCHEMA,
     generatedAt: typeof options.generatedAt === "string" ? options.generatedAt : new Date().toISOString(),
     seed: finiteOrDefault(options.seed, 1942),
-    inputCount: Array.isArray(options.inputs) ? options.inputs.length : 0,
-    eligibleSamples: sourceSamples.length,
-    selectedSamples: selectedSamples.length,
+    inputCount: finiteCount(options.inputCount),
+    eligibleSamples: finiteCount(options.eligibleSamples),
+    selectedSamples: finiteCount(options.selectedSamples),
     sampleCount: samples.length,
-    maxSamples,
+    maxSamples: finiteCount(options.maxSamples),
+    sides: normalizeSides(options.sides || options.side),
     balanceBy: options.balanceBy || "none",
     priorityBy: options.priorityBy || "policyEntropy",
     includeStateSnapshots: options.includeStateSnapshots !== false,
     search: summarizeSearchOptions(options.searchOptions || {}),
+    evidence: summarizeAlphaReanalysisEvidence(samples),
     errors,
     samples,
+  };
+}
+
+function normalizeSides(value) {
+  const values = Array.isArray(value) ? value : String(value || "").split(",");
+  return [...new Set(values.map((side) => String(side).trim().toLowerCase()).filter((side) => (
+    side === "axis" || side === "allied"
+  )))].sort();
+}
+
+export function summarizeAlphaReanalysisEvidence(samples = []) {
+  const changed = (samples || []).filter((sample) => sample?.reanalysis?.selectedActionChanged === true).length;
+  const comparable = (samples || []).filter((sample) => sample?.reanalysis?.selectedActionChanged !== null).length;
+  const rootDeltas = (samples || [])
+    .map((sample) => Math.abs(Number(sample?.reanalysis?.rootValueDelta)))
+    .filter(Number.isFinite);
+  const searchIterations = (samples || [])
+    .map((sample) => Number(sample?.decision?.searchIterations))
+    .filter(Number.isFinite);
+  const rootVisits = (samples || [])
+    .map((sample) => Number(sample?.decision?.rootVisits))
+    .filter(Number.isFinite);
+  return {
+    schema: "zizi-el-alamein-alpha-reanalysis-evidence-v1",
+    samples: samples.length,
+    comparableActions: comparable,
+    changedActions: changed,
+    changedActionShare: comparable ? round(changed / comparable) : 0,
+    averageAbsoluteRootValueDelta: average(rootDeltas),
+    averageSearchIterations: average(searchIterations),
+    averageRootVisits: average(rootVisits),
   };
 }
 
@@ -103,8 +159,16 @@ function reanalyzeSample(sourceSample, options) {
   const environmentHash = stateHash(environment);
   const outcome = finiteOrNull(sourceSample.outcome);
   const outcomeWeight = finiteOrDefault(sourceSample.outcomeWeight, 1);
+  const sourceSelectedAction = sourceSample?.decision?.selectedAction || sourceSample?.policy?.[0]?.action || null;
+  const selectedActionChanged = sourceSelectedAction && analysis.bestAction
+    ? actionKey(sourceSelectedAction) !== actionKey(analysis.bestAction)
+    : null;
+  const sourceRootValue = finiteOrNull(sourceSample.rootValue);
+  const reanalyzedRootValue = finiteOrNull(analysis.rootValue);
+  const trajectoryIds = normalizeTrajectoryIds(sourceSample.trajectoryIds);
   return {
     ...sample,
+    ...(trajectoryIds.length ? { trajectoryIds } : {}),
     outcome,
     outcomeSource: typeof sourceSample.outcomeSource === "string" ? sourceSample.outcomeSource : "reanalysis_unlabeled",
     outcomeWeight,
@@ -117,7 +181,17 @@ function reanalyzeSample(sourceSample, options) {
       sourceSide: sourceSample.side || null,
       sourceTurn: sourceSample.turn ?? null,
       sourcePhaseId: sourceSample.phaseId || null,
-      sourceRootValue: finiteOrNull(sourceSample.rootValue),
+      sourceRootValue,
+      reanalyzedRootValue,
+      rootValueDelta: sourceRootValue !== null && reanalyzedRootValue !== null
+        ? round(reanalyzedRootValue - sourceRootValue)
+        : null,
+      sourceSelectedAction: sourceSelectedAction ? cloneJsonLike(sourceSelectedAction) : null,
+      reanalyzedSelectedAction: analysis.bestAction ? cloneJsonLike(analysis.bestAction) : null,
+      selectedActionChanged,
+      sourcePolicyEntropy: finiteOrNull(sourceSample?.decision?.policyEntropy),
+      sourceSearchIterations: finiteOrNull(sourceSample?.decision?.searchIterations),
+      sourceRootVisits: finiteOrNull(sourceSample?.decision?.rootVisits),
       sourceOutcome: outcome,
       sourceOutcomeSource: typeof sourceSample.outcomeSource === "string" ? sourceSample.outcomeSource : null,
       sourceOutcomeWeight: outcomeWeight,
@@ -128,6 +202,19 @@ function reanalyzeSample(sourceSample, options) {
   };
 }
 
+function samplesFromReanalysisInput(input) {
+  if (input?.schema === "zizi-el-alamein-alpha-replay-buffer-v1") {
+    return samplesFromAlphaReplayBuffer(input);
+  }
+  if (input?.replayBuffer?.schema === "zizi-el-alamein-alpha-replay-buffer-v1") {
+    return samplesFromAlphaReplayBuffer({
+      ...input.replayBuffer,
+      source: input.source || input.replayBuffer.source,
+    });
+  }
+  return flattenAlphaSelfPlaySamples([input]);
+}
+
 function makeReanalysisDecision(analysis, searchOptions = {}) {
   return {
     schema: "zizi-el-alamein-alpha-self-play-decision-v1",
@@ -136,6 +223,10 @@ function makeReanalysisDecision(analysis, searchOptions = {}) {
     temperature: 0,
     rootNoiseWeight: finiteOrDefault(searchOptions.rootNoiseWeight, 0),
     policyEntropy: policyEntropy(analysis.policy || []),
+    recommendationConfidence: finiteOrNull(analysis.recommendation?.confidence),
+    recommendationVisitMargin: finiteOrNull(analysis.recommendation?.visitMargin),
+    recommendationQMargin: finiteOrNull(analysis.recommendation?.qMargin),
+    recommendationLabel: typeof analysis.recommendation?.label === "string" ? analysis.recommendation.label : null,
     policySize: Array.isArray(analysis.policy) ? analysis.policy.length : 0,
     searchIterations: finiteOrDefault(analysis.search?.iterations, 0),
     rootVisits: finiteOrDefault(analysis.search?.rootVisits, 0),
@@ -149,6 +240,14 @@ function summarizeSearchOptions(searchOptions = {}) {
     actionLimit: finiteOrNull(searchOptions.actionLimit),
     preApplyLimit: finiteOrNull(searchOptions.preApplyLimit),
     policyWeight: finiteOrNull(searchOptions.policyWeight),
+    rootSelectionMode: String(searchOptions.rootSelectionMode || "puct"),
+    gumbelScale: finiteOrNull(searchOptions.gumbelScale),
+    gumbelPriorScale: finiteOrNull(searchOptions.gumbelPriorScale),
+    gumbelValueScale: finiteOrNull(searchOptions.gumbelValueScale),
+    gumbelSeed: searchOptions.gumbelSeed ?? null,
+    phasePlanWeight: finiteOrNull(searchOptions.phasePlanWeight),
+    phasePlanNodeLimit: finiteOrNull(searchOptions.phasePlanNodeLimit),
+    phasePlanBeamWidth: finiteOrNull(searchOptions.phasePlanBeamWidth),
     rootNoiseWeight: finiteOrDefault(searchOptions.rootNoiseWeight, 0),
   };
 }
@@ -179,6 +278,15 @@ function finiteOrNull(value) {
 function finiteOrDefault(value, fallback) {
   const next = Number(value);
   return Number.isFinite(next) ? next : fallback;
+}
+
+function finiteCount(value) {
+  const next = Number(value);
+  return Number.isFinite(next) ? Math.max(0, Math.floor(next)) : 0;
+}
+
+function average(values) {
+  return values.length ? round(values.reduce((sum, value) => sum + value, 0) / values.length) : 0;
 }
 
 function round(value, digits = 6) {

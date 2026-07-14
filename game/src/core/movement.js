@@ -1,7 +1,6 @@
 import { neighborsOf } from "./board.js";
 import { terrainRule } from "./terrain.js";
-import { isEnemyZoc } from "./zoc.js";
-import { liveUnitAt, resolveUnit } from "./units.js";
+import { liveUnits, resolveUnit } from "./units.js";
 
 /**
  * Calculates the unit movement allowance after scenario-wide modifiers.
@@ -44,10 +43,17 @@ export function getReachableHexes(context, unitOrId, allowance = null) {
   const result = new Map();
   const queue = [{ hexId: startHexId, spent: 0, firstStep: true, path: [startHexId] }];
   const bestSpent = new Map([[startHexId, 0]]);
+  const activeUnits = liveUnits(units);
+  const occupantByHex = new Map(activeUnits.map((candidate) => [candidate.hexId, candidate]));
+  const enemyZocHexes = new Set();
+  for (const candidate of activeUnits) {
+    if (candidate.side === unit.side || candidate.disrupted) continue;
+    for (const hexId of neighborsOf(board, candidate.hexId)) enemyZocHexes.add(hexId);
+  }
 
-  while (queue.length) {
-    const current = queue.shift();
-    const currentInZoc = isEnemyZoc(context, current.hexId, unit.side, unit.id);
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    const current = queue[cursor];
+    const currentInZoc = enemyZocHexes.has(current.hexId);
     if (!current.firstStep && currentInZoc) continue;
 
     for (const nextId of neighborsOf(board, current.hexId)) {
@@ -55,10 +61,10 @@ export function getReachableHexes(context, unitOrId, allowance = null) {
       const rule = terrainRule(rules, nextHex);
       if (!rule.passable) continue;
 
-      const occupant = liveUnitAt(units, nextId);
+      const occupant = occupantByHex.get(nextId) || null;
       if (occupant && occupant.side !== unit.side) continue;
 
-      const nextInZoc = isEnemyZoc(context, nextId, unit.side, unit.id);
+      const nextInZoc = enemyZocHexes.has(nextId);
       if (currentInZoc && nextInZoc) continue;
 
       const spent = current.spent + Number(rule.movement || 1);

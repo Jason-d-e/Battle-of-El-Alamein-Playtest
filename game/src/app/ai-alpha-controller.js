@@ -21,6 +21,7 @@ export function createAlphaAiClient({
   let nextRequestId = 1;
   let lastMode = "direct";
   let lastAnalysis = null;
+  const pendingRequests = new Set();
 
   async function chooseAction(payload = {}, options = {}) {
     const response = await requestWorker(ALPHA_RUNTIME_MESSAGE.CHOOSE_ACTION, payload, options);
@@ -28,6 +29,10 @@ export function createAlphaAiClient({
       lastMode = "worker";
       lastAnalysis = response.analysis || null;
       return response.action || null;
+    }
+    if (response?.cancelled) {
+      lastMode = "cancelled";
+      return null;
     }
     lastMode = "direct";
     if (!directFallback) return null;
@@ -47,6 +52,10 @@ export function createAlphaAiClient({
       lastAnalysis = response.analysis || null;
       return response.analysis || null;
     }
+    if (response?.cancelled) {
+      lastMode = "cancelled";
+      return null;
+    }
     lastMode = "direct";
     if (!directFallback) return null;
     lastAnalysis = directRuntime.analyzeAlphaPosition?.(payload) || null;
@@ -55,13 +64,27 @@ export function createAlphaAiClient({
 
   function getMode() {
     if (worker && !workerFailed) return lastMode;
+    if (workerFactory && !workerFailed) return "worker-ready";
     return directFallback ? "direct" : "disabled";
   }
 
+  function getLastRequestStatus() {
+    return lastMode;
+  }
+
   function dispose() {
-    worker?.terminate?.();
+    cancelPending("disposed", { disable: true });
+  }
+
+  function cancelPending(reason = "cancelled", options = {}) {
+    const target = worker;
     worker = null;
-    workerFailed = true;
+    workerFailed = Boolean(options.disable);
+    target?.terminate?.();
+    const pending = [...pendingRequests];
+    for (const cancel of pending) cancel(reason);
+    lastMode = reason;
+    return pending.length;
   }
 
   function getLastAnalysis() {
@@ -80,12 +103,14 @@ export function createAlphaAiClient({
     const waitMs = Math.max(1, Number(options.timeoutMs ?? timeoutMs));
     return new Promise((resolve) => {
       let settled = false;
+      let cancelRequest = null;
       const cleanup = () => {
         settled = true;
         clearTimeout(timer);
         target.removeEventListener?.("message", onMessage);
         target.removeEventListener?.("error", onError);
         target.removeEventListener?.("messageerror", onError);
+        if (cancelRequest) pendingRequests.delete(cancelRequest);
       };
       const settle = (value) => {
         if (settled) return;
@@ -97,6 +122,13 @@ export function createAlphaAiClient({
         if (data?.id !== id) return;
         settle(data);
       };
+      cancelRequest = (reason = "cancelled") => settle({
+        id,
+        type: `${type}_RESULT`,
+        ok: false,
+        cancelled: true,
+        reason,
+      });
       const failWorker = () => {
         workerFailed = true;
         if (worker === target) worker = null;
@@ -113,6 +145,7 @@ export function createAlphaAiClient({
       target.addEventListener?.("message", onMessage);
       target.addEventListener?.("error", onError);
       target.addEventListener?.("messageerror", onError);
+      pendingRequests.add(cancelRequest);
       try {
         target.postMessage(message);
       } catch {
@@ -127,6 +160,11 @@ export function createAlphaAiClient({
     if (worker) return worker;
     try {
       worker = workerFactory();
+      if (!worker) {
+        workerFailed = true;
+        worker = null;
+        return null;
+      }
       return worker;
     } catch {
       workerFailed = true;
@@ -137,9 +175,11 @@ export function createAlphaAiClient({
 
   return {
     analyze,
+    cancelPending,
     chooseAction,
     dispose,
     getLastAnalysis,
+    getLastRequestStatus,
     getMode,
   };
 }

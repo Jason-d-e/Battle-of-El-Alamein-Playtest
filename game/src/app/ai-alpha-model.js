@@ -1,3 +1,12 @@
+import {
+  alphaDenseNetworkParameterCount,
+  normalizeAlphaDenseNetwork,
+} from "./ai-alpha-network.js";
+import {
+  alphaHexGraphParameterCount,
+  normalizeAlphaHexGraphModel,
+} from "./ai-alpha-hex-graph.js";
+
 export const ALPHA_MODEL_SCHEMA = "zizi-el-alamein-alpha-model-v1";
 export const ALPHA_VALUE_MODEL_SCHEMA = "zizi-el-alamein-alpha-value-model-v1";
 export const ALPHA_POLICY_MODEL_SCHEMA = "zizi-el-alamein-alpha-policy-model-v1";
@@ -5,8 +14,10 @@ export const ALPHA_RELEASE_METADATA_SCHEMA = "zizi-el-alamein-alpha-release-meta
 export const ALPHA_TRAINING_METADATA_SCHEMA = "zizi-el-alamein-alpha-training-metadata-v1";
 export const ALPHA_TRAINING_DATA_SUMMARY_SCHEMA = "zizi-el-alamein-alpha-training-data-summary-v1";
 export const ALPHA_TRAINING_VALIDATION_SCHEMA = "zizi-el-alamein-alpha-training-validation-v1";
+export const ALPHA_TRAINING_PROFILE_EVIDENCE_SCHEMA = "zizi-el-alamein-alpha-training-profile-evidence-v1";
 export const ALPHA_ENVIRONMENT_SCHEMA = "zizi-el-alamein-alpha-environment-v1";
 export const ALPHA_FEATURE_CONTRACT_SCHEMA = "zizi-el-alamein-alpha-feature-contract-v1";
+const SUPPORTED_TRAINING_VALIDATION_GROUP_BY = Object.freeze(["sample", "stateHash", "side", "phase", "trajectory"]);
 
 export function extractAlphaModelArtifact(value) {
   if (!value || typeof value !== "object") return null;
@@ -43,30 +54,102 @@ export function validateAlphaModelArtifact(value) {
 export function validateReleasedAlphaModelArtifact(value, options = {}) {
   const validation = validateAlphaModelArtifact(value);
   if (!validation.ok) return validation;
+  const release = validation.model.release;
   const minSuiteGames = Math.max(0, Number(options.minSuiteGames ?? 2));
   const minSuiteSides = Math.max(0, Number(options.minSuiteSides ?? 2));
+  const minEvaluationPhases = Math.max(0, Number(options.minEvaluationPhases ?? release?.minEvaluationPhases ?? 0));
   const minFixedPositions = Math.max(0, Number(options.minFixedPositions ?? 0));
   const minChallengePositions = Math.max(0, Number(options.minChallengePositions ?? 0));
   const maxErrors = Math.max(0, Number(options.maxErrors ?? 0));
   const requireExplicitSuite = options.requireExplicitSuite !== false;
   const requireSourceFingerprint = options.requireSourceFingerprint !== false;
-  const release = validation.model.release;
   const minSideScore = optionalFiniteOrNull(options.minSideScore ?? release?.minSideScore);
+  const minSideScoreDelta = optionalFiniteOrNull(options.minSideScoreDelta ?? release?.minSideScoreDelta);
   const minScoreLowerBound = optionalFiniteOrNull(options.minScoreLowerBound ?? release?.minScoreLowerBound);
+  const minEloLowerBound = optionalFiniteOrNull(options.minEloLowerBound ?? release?.minEloLowerBound);
+  const maxArenaDrawRate = optionalFiniteOrNull(options.maxArenaDrawRate ?? release?.maxArenaDrawRate);
+  const minArenaDecisiveRate = optionalFiniteOrNull(options.minArenaDecisiveRate ?? release?.minArenaDecisiveRate);
   const minAnalyzedActions = optionalFiniteOrNull(options.minAnalyzedActions ?? release?.minAnalyzedActions);
   const minAverageRootVisits = optionalFiniteOrNull(options.minAverageRootVisits ?? release?.minAverageRootVisits);
+  const minCandidateAnalyzedActions = optionalFiniteOrNull(
+    options.minCandidateAnalyzedActions ?? release?.minCandidateAnalyzedActions,
+  );
+  const minCandidateAverageRootVisits = optionalFiniteOrNull(
+    options.minCandidateAverageRootVisits ?? release?.minCandidateAverageRootVisits,
+  );
+  const minCandidateDecisionActionTypes = optionalFiniteOrNull(
+    options.minCandidateDecisionActionTypes ?? release?.minCandidateDecisionActionTypes,
+  );
+  const minCandidateDecisionAverageRecommendationConfidence = optionalFiniteOrNull(
+    options.minCandidateDecisionAverageRecommendationConfidence ?? release?.minCandidateDecisionAverageRecommendationConfidence,
+  );
+  const maxCandidateDecisionAverageRecommendationUncertainty = optionalFiniteOrNull(
+    options.maxCandidateDecisionAverageRecommendationUncertainty ?? release?.maxCandidateDecisionAverageRecommendationUncertainty,
+  );
+  const minCandidateDecisionSelectedActionShare = optionalFiniteOrNull(
+    options.minCandidateDecisionSelectedActionShare ?? release?.minCandidateDecisionSelectedActionShare,
+  );
+  const minDecisionAverageRecommendationConfidence = optionalFiniteOrNull(
+    options.minDecisionAverageRecommendationConfidence ?? release?.minDecisionAverageRecommendationConfidence,
+  );
+  const maxDecisionAverageRecommendationUncertainty = optionalFiniteOrNull(
+    options.maxDecisionAverageRecommendationUncertainty ?? release?.maxDecisionAverageRecommendationUncertainty,
+  );
+  const minDecisionSelectedActionShare = optionalFiniteOrNull(
+    options.minDecisionSelectedActionShare ?? release?.minDecisionSelectedActionShare,
+  );
+  const minDecisionActionTypes = optionalFiniteOrNull(
+    options.minDecisionActionTypes ?? release?.minDecisionActionTypes,
+  );
+  const maxDecisionFallbackRate = optionalFiniteOrNull(
+    options.maxDecisionFallbackRate ?? release?.maxDecisionFallbackRate,
+  );
+  const minReferenceArenaScore = optionalFiniteOrNull(options.minReferenceArenaScore ?? release?.minReferenceArenaScore);
+  const minReferenceArenaReferences = optionalFiniteOrNull(
+    options.minReferenceArenaReferences ?? release?.minReferenceArenaReferences,
+  );
+  const maxReferenceArenaErrors = optionalFiniteOrNull(options.maxReferenceArenaErrors ?? release?.maxReferenceArenaErrors);
+  const minChallengeAverageRecommendationUncertainty = optionalFiniteOrNull(
+    options.minChallengeAverageRecommendationUncertainty ?? release?.minChallengeAverageRecommendationUncertainty,
+  );
+  const minContestedChallengePositions = optionalFiniteOrNull(
+    options.minContestedChallengePositions ?? release?.minContestedChallengePositions,
+  );
+  const minChallengeAverageRuntimeRisk = optionalFiniteOrNull(
+    options.minChallengeAverageRuntimeRisk ?? release?.minChallengeAverageRuntimeRisk,
+  );
+  const minRuntimeRiskChallengePositions = optionalFiniteOrNull(
+    options.minRuntimeRiskChallengePositions ?? release?.minRuntimeRiskChallengePositions,
+  );
+  const requiredTrainingProfile = stringOrNull(options.requiredTrainingProfile ?? release?.requiredTrainingProfile);
   const trainingGate = trainingDataGate(validation.model.training?.data, {
     minTrainingSamples: options.minTrainingSamples ?? release?.minTrainingSamples,
+    minTrainingValueSamples: options.minTrainingValueSamples ?? release?.minTrainingValueSamples,
+    minTrainingOutcomeClasses: options.minTrainingOutcomeClasses ?? release?.minTrainingOutcomeClasses,
+    minTrainingPolicyRows: options.minTrainingPolicyRows ?? release?.minTrainingPolicyRows,
+    minTrainingPolicyActionTypes: options.minTrainingPolicyActionTypes ?? release?.minTrainingPolicyActionTypes,
+    minTrainingUniqueStateHashes: options.minTrainingUniqueStateHashes ?? release?.minTrainingUniqueStateHashes,
+    maxTrainingDuplicateStateRate: options.maxTrainingDuplicateStateRate ?? release?.maxTrainingDuplicateStateRate,
     minTrainingSides: options.minTrainingSides ?? release?.minTrainingSides,
     minTrainingSources: options.minTrainingSources ?? release?.minTrainingSources,
     minTrainingReanalysisSamples: options.minTrainingReanalysisSamples ?? release?.minTrainingReanalysisSamples,
     minTrainingStateSnapshots: options.minTrainingStateSnapshots ?? release?.minTrainingStateSnapshots,
     minTrainingAverageRootVisits: options.minTrainingAverageRootVisits ?? release?.minTrainingAverageRootVisits,
+    minTrainingSelectedActionShare: options.minTrainingSelectedActionShare ?? release?.minTrainingSelectedActionShare,
+    minTrainingExplorationShare: options.minTrainingExplorationShare ?? release?.minTrainingExplorationShare,
   });
   const validationGate = trainingValidationGate(validation.model.training?.validation, {
     minTrainingValidationSamples: options.minTrainingValidationSamples ?? release?.minTrainingValidationSamples,
+    minTrainingValidationSides: options.minTrainingValidationSides ?? release?.minTrainingValidationSides,
+    minTrainingValidationPhases: options.minTrainingValidationPhases ?? release?.minTrainingValidationPhases,
+    minTrainingValidationGroups: options.minTrainingValidationGroups ?? release?.minTrainingValidationGroups,
+    requiredTrainingValidationGroupBy: options.requiredTrainingValidationGroupBy ?? release?.requiredTrainingValidationGroupBy,
     maxTrainingValidationValueMse: options.maxTrainingValidationValueMse ?? release?.maxTrainingValidationValueMse,
+    maxTrainingValidationValueCalibrationBias: options.maxTrainingValidationValueCalibrationBias
+      ?? release?.maxTrainingValidationValueCalibrationBias,
     maxTrainingValidationPolicyCrossEntropy: options.maxTrainingValidationPolicyCrossEntropy ?? release?.maxTrainingValidationPolicyCrossEntropy,
+    minTrainingValidationPolicyTopChoiceAccuracy: options.minTrainingValidationPolicyTopChoiceAccuracy
+      ?? release?.minTrainingValidationPolicyTopChoiceAccuracy,
   });
   const expectedEnvironment = normalizeAlphaModelEnvironment(options.expectedEnvironment)
     || alphaModelEnvironmentFingerprint({ scenario: options.scenario, rules: options.rules });
@@ -77,8 +160,13 @@ export function validateReleasedAlphaModelArtifact(value, options = {}) {
   const featureContractGate = validateAlphaModelFeatureContract(validation.model, expectedFeatureContract, {
     requireFeatureContract: options.requireFeatureContract,
   });
+  const spatialContractGate = validateAlphaModelSpatialContract(validation.model, options.expectedSpatialContract);
   if (!release) return releaseValidationError("missing_release_metadata", validation.model);
   if (!release.promoted) return releaseValidationError("model_not_promoted", validation.model);
+  const promotionVerdictGateResult = promotionVerdictGate(release.promotionVerdict);
+  if (!promotionVerdictGateResult.ok) {
+    return releaseValidationError(promotionVerdictGateResult.reason, validation.model);
+  }
   if (requireSourceFingerprint && !release.sourceArtifact) {
     return releaseValidationError("missing_release_source_artifact", validation.model);
   }
@@ -95,18 +183,43 @@ export function validateReleasedAlphaModelArtifact(value, options = {}) {
   if (Number(release.evaluationSuite?.sides || 0) < minSuiteSides) {
     return releaseValidationError("evaluation_suite_side_coverage_too_narrow", validation.model);
   }
+  if (Number(release.evaluationSuite?.phaseCoverage?.phases || 0) < minEvaluationPhases) {
+    return releaseValidationError("evaluation_suite_phase_coverage_too_narrow", validation.model);
+  }
   if (Number(release.evaluationSuite?.fixedPositions || 0) < minFixedPositions) {
     return releaseValidationError("evaluation_suite_fixed_positions_too_few", validation.model);
   }
   if (Number(release.evaluationSuite?.challengePositions || 0) < minChallengePositions) {
     return releaseValidationError("evaluation_suite_challenge_positions_too_few", validation.model);
   }
+  const challengeQualityGateResult = challengeQualityGate(release.evaluationSuite?.challengeQuality, {
+    minChallengeAverageRecommendationUncertainty,
+    minContestedChallengePositions,
+    minChallengeAverageRuntimeRisk,
+    minRuntimeRiskChallengePositions,
+  });
+  if (!challengeQualityGateResult.ok) {
+    return releaseValidationError(challengeQualityGateResult.reason, validation.model);
+  }
+  const profileGate = trainingProfileGate(release.trainingProfile, requiredTrainingProfile);
+  if (!profileGate.ok) return releaseValidationError(profileGate.reason, validation.model);
   if (minSideScore !== null) {
     if (!release.sideScores?.length) return releaseValidationError("missing_side_score_evidence", validation.model);
     const weakSide = release.sideScores.find((score) => (
       Number(score.scoredGames || 0) < 1 || Number(score.candidateScore || 0) < minSideScore
     ));
     if (weakSide) return releaseValidationError("candidate_side_score_below_threshold", validation.model);
+  }
+  if (minSideScoreDelta !== null) {
+    if (!release.sideScores?.length) return releaseValidationError("missing_side_score_evidence", validation.model);
+    const weakSide = release.sideScores.find((score) => (
+      Number(score.scoredGames || 0) < 1
+      || optionalFiniteOrNull(score.scoreDelta) === null
+      || Number(score.scoreDelta) < minSideScoreDelta
+    ));
+    if (weakSide || release.sideScoreDeltaPass === false) {
+      return releaseValidationError("candidate_side_score_delta_below_threshold", validation.model);
+    }
   }
   if (minScoreLowerBound !== null) {
     if (!release.arena?.scoreInterval95) return releaseValidationError("missing_arena_evidence", validation.model);
@@ -117,7 +230,47 @@ export function validateReleasedAlphaModelArtifact(value, options = {}) {
       return releaseValidationError("candidate_score_lower_bound_below_threshold", validation.model);
     }
   }
-  if (minAnalyzedActions !== null || minAverageRootVisits !== null) {
+  if (minEloLowerBound !== null) {
+    if (!release.arena?.eloDiffInterval95) return releaseValidationError("missing_arena_evidence", validation.model);
+    if (
+      release.eloLowerBoundPass === false
+      || Number(release.arena.eloDiffInterval95.low || 0) < minEloLowerBound
+    ) {
+      return releaseValidationError("candidate_elo_lower_bound_below_threshold", validation.model);
+    }
+  }
+  if (maxArenaDrawRate !== null || minArenaDecisiveRate !== null) {
+    if (!release.arena || Number(release.arena.scoredGames || 0) < 1) {
+      return releaseValidationError("missing_arena_evidence", validation.model);
+    }
+    if (
+      maxArenaDrawRate !== null
+      && (
+        release.drawRatePass === false
+        || Number(release.arena.drawRate || 0) > maxArenaDrawRate
+      )
+    ) {
+      return releaseValidationError("arena_draw_rate_too_high", validation.model);
+    }
+    if (
+      minArenaDecisiveRate !== null
+      && (
+        release.decisiveRatePass === false
+        || Number(release.arena.decisiveRate || 0) < minArenaDecisiveRate
+      )
+    ) {
+      return releaseValidationError("arena_decisive_rate_too_low", validation.model);
+    }
+  }
+  if (
+    minAnalyzedActions !== null
+    || minAverageRootVisits !== null
+    || minDecisionAverageRecommendationConfidence !== null
+    || maxDecisionAverageRecommendationUncertainty !== null
+    || minDecisionSelectedActionShare !== null
+    || minDecisionActionTypes !== null
+    || maxDecisionFallbackRate !== null
+  ) {
     if (!release.decisionEvidence) return releaseValidationError("missing_decision_evidence", validation.model);
     if (minAnalyzedActions !== null && Number(release.decisionEvidence.analyzedActions || 0) < minAnalyzedActions) {
       return releaseValidationError("decision_evidence_too_few_analyzed_actions", validation.model);
@@ -125,17 +278,148 @@ export function validateReleasedAlphaModelArtifact(value, options = {}) {
     if (minAverageRootVisits !== null && Number(release.decisionEvidence.averageRootVisits || 0) < minAverageRootVisits) {
       return releaseValidationError("decision_evidence_root_visits_too_low", validation.model);
     }
+    if (minDecisionActionTypes !== null && countActionTypes(release.decisionEvidence.actionTypes) < minDecisionActionTypes) {
+      return releaseValidationError("decision_evidence_action_coverage_too_narrow", validation.model);
+    }
+    if (
+      minDecisionAverageRecommendationConfidence !== null
+      && (
+        release.decisionEvidence.averageRecommendationConfidence === null
+        || release.decisionEvidence.averageRecommendationConfidence === undefined
+        || Number(release.decisionEvidence.averageRecommendationConfidence) < minDecisionAverageRecommendationConfidence
+      )
+    ) {
+      return releaseValidationError("decision_evidence_confidence_too_low", validation.model);
+    }
+    if (
+      maxDecisionAverageRecommendationUncertainty !== null
+      && (
+        release.decisionEvidence.averageRecommendationUncertainty === null
+        || release.decisionEvidence.averageRecommendationUncertainty === undefined
+        || Number(release.decisionEvidence.averageRecommendationUncertainty) > maxDecisionAverageRecommendationUncertainty
+      )
+    ) {
+      return releaseValidationError("decision_evidence_uncertainty_too_high", validation.model);
+    }
+    if (
+      minDecisionSelectedActionShare !== null
+      && (
+        release.decisionEvidence.selectedActionShare === null
+        || release.decisionEvidence.selectedActionShare === undefined
+        || Number(release.decisionEvidence.selectedActionShare) < minDecisionSelectedActionShare
+      )
+    ) {
+      return releaseValidationError("decision_evidence_selected_share_too_low", validation.model);
+    }
+    if (maxDecisionFallbackRate !== null) {
+      const fallbackRate = decisionFallbackRate(release.decisionEvidence);
+      if (fallbackRate === null) return releaseValidationError("decision_evidence_too_few_decisions", validation.model);
+      if (fallbackRate > maxDecisionFallbackRate) {
+        return releaseValidationError("decision_evidence_fallback_rate_too_high", validation.model);
+      }
+    }
+  }
+  if (
+    minCandidateAnalyzedActions !== null
+    || minCandidateAverageRootVisits !== null
+    || minCandidateDecisionActionTypes !== null
+    || minCandidateDecisionAverageRecommendationConfidence !== null
+    || maxCandidateDecisionAverageRecommendationUncertainty !== null
+    || minCandidateDecisionSelectedActionShare !== null
+  ) {
+    const candidate = release.decisionEvidence?.roles?.candidate;
+    if (!candidate || Number(candidate.actionCount || 0) < 1) {
+      return releaseValidationError("missing_candidate_decision_evidence", validation.model);
+    }
+    if (
+      minCandidateAnalyzedActions !== null
+      && Number(candidate.analyzedActions || 0) < minCandidateAnalyzedActions
+    ) {
+      return releaseValidationError("candidate_decision_evidence_too_few_analyzed_actions", validation.model);
+    }
+    if (
+      minCandidateAverageRootVisits !== null
+      && Number(candidate.averageRootVisits || 0) < minCandidateAverageRootVisits
+    ) {
+      return releaseValidationError("candidate_decision_evidence_root_visits_too_low", validation.model);
+    }
+    if (minCandidateDecisionActionTypes !== null && countActionTypes(candidate.actionTypes) < minCandidateDecisionActionTypes) {
+      return releaseValidationError("candidate_decision_evidence_action_coverage_too_narrow", validation.model);
+    }
+    if (
+      minCandidateDecisionAverageRecommendationConfidence !== null
+      && (
+        candidate.averageRecommendationConfidence === null
+        || candidate.averageRecommendationConfidence === undefined
+        || Number(candidate.averageRecommendationConfidence) < minCandidateDecisionAverageRecommendationConfidence
+      )
+    ) {
+      return releaseValidationError("candidate_decision_evidence_confidence_too_low", validation.model);
+    }
+    if (
+      maxCandidateDecisionAverageRecommendationUncertainty !== null
+      && (
+        candidate.averageRecommendationUncertainty === null
+        || candidate.averageRecommendationUncertainty === undefined
+        || Number(candidate.averageRecommendationUncertainty) > maxCandidateDecisionAverageRecommendationUncertainty
+      )
+    ) {
+      return releaseValidationError("candidate_decision_evidence_uncertainty_too_high", validation.model);
+    }
+    if (
+      minCandidateDecisionSelectedActionShare !== null
+      && (
+        candidate.selectedActionShare === null
+        || candidate.selectedActionShare === undefined
+        || Number(candidate.selectedActionShare) < minCandidateDecisionSelectedActionShare
+      )
+    ) {
+      return releaseValidationError("candidate_decision_evidence_selected_share_too_low", validation.model);
+    }
   }
   if (!trainingGate.ok) return releaseValidationError(trainingGate.reason, validation.model);
   if (!validationGate.ok) return releaseValidationError(validationGate.reason, validation.model);
+  const referenceGate = referenceArenaGate(release.referenceArena, {
+    minReferenceArenaScore,
+    minReferenceArenaReferences,
+    maxReferenceArenaErrors,
+  });
+  if (!referenceGate.ok) return releaseValidationError(referenceGate.reason, validation.model);
   if (!environmentGate.ok) return releaseValidationError(environmentGate.reason, validation.model, environmentGate);
   if (!featureContractGate.ok) {
     return releaseValidationError(featureContractGate.reason, validation.model, environmentGate, featureContractGate);
+  }
+  if (!spatialContractGate.ok) {
+    return releaseValidationError(
+      spatialContractGate.reason,
+      validation.model,
+      environmentGate,
+      featureContractGate,
+      spatialContractGate,
+    );
   }
   return {
     ...validation,
     environment: environmentGate,
     featureContract: featureContractGate,
+    spatialContract: spatialContractGate,
+  };
+}
+
+export function validateAlphaModelSpatialContract(modelOrArtifact, expectedContract = null) {
+  const model = normalizeAlphaModelArtifact(modelOrArtifact);
+  const hexGraph = model?.hexGraph || normalizeAlphaHexGraphModel(modelOrArtifact?.hexGraph ?? modelOrArtifact);
+  if (!hexGraph) return { ok: true, reason: null, match: null, fingerprint: null, expectedFingerprint: null };
+  const fingerprint = hexGraph.contractFingerprint;
+  const expectedFingerprint = typeof expectedContract?.fingerprint === "string" ? expectedContract.fingerprint : null;
+  if (!expectedFingerprint) return { ok: true, reason: null, match: null, fingerprint, expectedFingerprint: null };
+  const match = fingerprint === expectedFingerprint;
+  return {
+    ok: match,
+    reason: match ? null : "model_spatial_contract_mismatch",
+    match,
+    fingerprint,
+    expectedFingerprint,
   };
 }
 
@@ -144,7 +428,8 @@ export function normalizeAlphaModelArtifact(value) {
   if (value.schema !== ALPHA_MODEL_SCHEMA) return null;
   const valueModel = normalizeSubModel(value.value, ALPHA_VALUE_MODEL_SCHEMA);
   const policyModel = normalizeSubModel(value.policy, ALPHA_POLICY_MODEL_SCHEMA);
-  if (!valueModel && !policyModel) return null;
+  const hexGraph = normalizeAlphaHexGraphModel(value.hexGraph);
+  if (!valueModel && !policyModel && !hexGraph) return null;
   return {
     schema: ALPHA_MODEL_SCHEMA,
     generatedAt: typeof value.generatedAt === "string" ? value.generatedAt : null,
@@ -156,6 +441,7 @@ export function normalizeAlphaModelArtifact(value) {
     training: normalizeAlphaTrainingMetadata(value.training),
     value: valueModel,
     policy: policyModel,
+    hexGraph,
     release: normalizeAlphaReleaseMetadata(value.release),
   };
 }
@@ -173,8 +459,14 @@ export function alphaModelMetadata(value) {
     featureContract: model.featureContract,
     hasValue: Boolean(model.value),
     hasPolicy: Boolean(model.policy),
+    hasHexGraph: Boolean(model.hexGraph),
     valueWeights: model.value ? Object.keys(model.value.weights).length : 0,
     policyWeights: model.policy ? Object.keys(model.policy.weights).length : 0,
+    valueArchitecture: model.value?.architecture || "linear-v1",
+    policyArchitecture: model.policy?.architecture || "linear-v1",
+    valueNetworkParameters: alphaDenseNetworkParameterCount(model.value?.network),
+    policyNetworkParameters: alphaDenseNetworkParameterCount(model.policy?.network),
+    hexGraphParameters: alphaHexGraphParameterCount(model.hexGraph),
     training: model.training ? {
       schema: model.training.schema,
       warmStarted: model.training.warmStarted,
@@ -191,21 +483,66 @@ export function alphaModelMetadata(value) {
       sourceSizeBytes: model.release.sourceSizeBytes,
       candidateScore: model.release.candidateScore,
       minSideScore: model.release.minSideScore,
+      minSideScoreDelta: model.release.minSideScoreDelta,
       minScoreLowerBound: model.release.minScoreLowerBound,
+      minEloLowerBound: model.release.minEloLowerBound,
+      maxArenaDrawRate: model.release.maxArenaDrawRate,
+      minArenaDecisiveRate: model.release.minArenaDecisiveRate,
       minAnalyzedActions: model.release.minAnalyzedActions,
       minAverageRootVisits: model.release.minAverageRootVisits,
+      minCandidateAnalyzedActions: model.release.minCandidateAnalyzedActions,
+      minCandidateAverageRootVisits: model.release.minCandidateAverageRootVisits,
+      minCandidateDecisionActionTypes: model.release.minCandidateDecisionActionTypes,
+      minCandidateDecisionAverageRecommendationConfidence: model.release.minCandidateDecisionAverageRecommendationConfidence,
+      maxCandidateDecisionAverageRecommendationUncertainty: model.release.maxCandidateDecisionAverageRecommendationUncertainty,
+      minCandidateDecisionSelectedActionShare: model.release.minCandidateDecisionSelectedActionShare,
+      minDecisionAverageRecommendationConfidence: model.release.minDecisionAverageRecommendationConfidence,
+      maxDecisionAverageRecommendationUncertainty: model.release.maxDecisionAverageRecommendationUncertainty,
+      minDecisionSelectedActionShare: model.release.minDecisionSelectedActionShare,
+      minDecisionActionTypes: model.release.minDecisionActionTypes,
+      maxDecisionFallbackRate: model.release.maxDecisionFallbackRate,
+      minReferenceArenaScore: model.release.minReferenceArenaScore,
+      minReferenceArenaReferences: model.release.minReferenceArenaReferences,
+      maxReferenceArenaErrors: model.release.maxReferenceArenaErrors,
+      minChallengeAverageRecommendationUncertainty: model.release.minChallengeAverageRecommendationUncertainty,
+      minContestedChallengePositions: model.release.minContestedChallengePositions,
+      minChallengeAverageRuntimeRisk: model.release.minChallengeAverageRuntimeRisk,
+      minRuntimeRiskChallengePositions: model.release.minRuntimeRiskChallengePositions,
+      minEvaluationPhases: model.release.minEvaluationPhases,
+      requiredTrainingProfile: model.release.requiredTrainingProfile,
+      trainingProfile: model.release.trainingProfile,
       minTrainingSamples: model.release.minTrainingSamples,
+      minTrainingValueSamples: model.release.minTrainingValueSamples,
+      minTrainingOutcomeClasses: model.release.minTrainingOutcomeClasses,
+      minTrainingPolicyRows: model.release.minTrainingPolicyRows,
+      minTrainingPolicyActionTypes: model.release.minTrainingPolicyActionTypes,
+      minTrainingUniqueStateHashes: model.release.minTrainingUniqueStateHashes,
+      maxTrainingDuplicateStateRate: model.release.maxTrainingDuplicateStateRate,
       minTrainingSides: model.release.minTrainingSides,
       minTrainingSources: model.release.minTrainingSources,
       minTrainingReanalysisSamples: model.release.minTrainingReanalysisSamples,
       minTrainingStateSnapshots: model.release.minTrainingStateSnapshots,
       minTrainingAverageRootVisits: model.release.minTrainingAverageRootVisits,
+      minTrainingSelectedActionShare: model.release.minTrainingSelectedActionShare,
+      minTrainingExplorationShare: model.release.minTrainingExplorationShare,
       minTrainingValidationSamples: model.release.minTrainingValidationSamples,
+      minTrainingValidationSides: model.release.minTrainingValidationSides,
+      minTrainingValidationPhases: model.release.minTrainingValidationPhases,
+      minTrainingValidationGroups: model.release.minTrainingValidationGroups,
+      requiredTrainingValidationGroupBy: model.release.requiredTrainingValidationGroupBy,
       maxTrainingValidationValueMse: model.release.maxTrainingValidationValueMse,
+      maxTrainingValidationValueCalibrationBias: model.release.maxTrainingValidationValueCalibrationBias,
       maxTrainingValidationPolicyCrossEntropy: model.release.maxTrainingValidationPolicyCrossEntropy,
+      minTrainingValidationPolicyTopChoiceAccuracy: model.release.minTrainingValidationPolicyTopChoiceAccuracy,
+      promotionVerdict: model.release.promotionVerdict,
+      sideScoreDeltaPass: model.release.sideScoreDeltaPass,
       scoreLowerBoundPass: model.release.scoreLowerBoundPass,
+      eloLowerBoundPass: model.release.eloLowerBoundPass,
+      drawRatePass: model.release.drawRatePass,
+      decisiveRatePass: model.release.decisiveRatePass,
       arena: model.release.arena,
       decisionEvidence: model.release.decisionEvidence,
+      referenceArena: model.release.referenceArena,
       activeGeneration: model.release.activeGeneration,
       evaluationSuite: model.release.evaluationSuite,
       sideScores: model.release.sideScores,
@@ -427,26 +764,87 @@ export function normalizeAlphaReleaseMetadata(value) {
     candidateScore: finiteOrNull(value.candidateScore),
     promotionThreshold: finiteOrNull(value.promotionThreshold),
     minSideScore: optionalFiniteOrNull(value.minSideScore),
+    minSideScoreDelta: optionalFiniteOrNull(value.minSideScoreDelta),
     minScoreLowerBound: optionalFiniteOrNull(value.minScoreLowerBound),
+    minEloLowerBound: optionalFiniteOrNull(value.minEloLowerBound),
+    maxArenaDrawRate: optionalFiniteOrNull(value.maxArenaDrawRate),
+    minArenaDecisiveRate: optionalFiniteOrNull(value.minArenaDecisiveRate),
     minAnalyzedActions: optionalFiniteOrNull(value.minAnalyzedActions),
     minAverageRootVisits: optionalFiniteOrNull(value.minAverageRootVisits),
+    minCandidateAnalyzedActions: optionalFiniteOrNull(value.minCandidateAnalyzedActions),
+    minCandidateAverageRootVisits: optionalFiniteOrNull(value.minCandidateAverageRootVisits),
+    minCandidateDecisionActionTypes: optionalFiniteOrNull(value.minCandidateDecisionActionTypes),
+    minCandidateDecisionAverageRecommendationConfidence: optionalFiniteOrNull(value.minCandidateDecisionAverageRecommendationConfidence),
+    maxCandidateDecisionAverageRecommendationUncertainty: optionalFiniteOrNull(value.maxCandidateDecisionAverageRecommendationUncertainty),
+    minCandidateDecisionSelectedActionShare: optionalFiniteOrNull(value.minCandidateDecisionSelectedActionShare),
+    minDecisionAverageRecommendationConfidence: optionalFiniteOrNull(value.minDecisionAverageRecommendationConfidence),
+    maxDecisionAverageRecommendationUncertainty: optionalFiniteOrNull(value.maxDecisionAverageRecommendationUncertainty),
+    minDecisionSelectedActionShare: optionalFiniteOrNull(value.minDecisionSelectedActionShare),
+    minDecisionActionTypes: optionalFiniteOrNull(value.minDecisionActionTypes),
+    maxDecisionFallbackRate: optionalFiniteOrNull(value.maxDecisionFallbackRate),
+    minReferenceArenaScore: optionalFiniteOrNull(value.minReferenceArenaScore),
+    minReferenceArenaReferences: optionalFiniteOrNull(value.minReferenceArenaReferences),
+    maxReferenceArenaErrors: optionalFiniteOrNull(value.maxReferenceArenaErrors),
+    minChallengeAverageRecommendationUncertainty: optionalFiniteOrNull(value.minChallengeAverageRecommendationUncertainty),
+    minContestedChallengePositions: optionalFiniteOrNull(value.minContestedChallengePositions),
+    minChallengeAverageRuntimeRisk: optionalFiniteOrNull(value.minChallengeAverageRuntimeRisk),
+    minRuntimeRiskChallengePositions: optionalFiniteOrNull(value.minRuntimeRiskChallengePositions),
+    minEvaluationPhases: optionalFiniteOrNull(value.minEvaluationPhases),
+    requiredTrainingProfile: stringOrNull(value.requiredTrainingProfile),
+    trainingProfile: normalizeAlphaTrainingProfileEvidence(value.trainingProfile),
     minTrainingSamples: optionalFiniteOrNull(value.minTrainingSamples),
+    minTrainingValueSamples: optionalFiniteOrNull(value.minTrainingValueSamples),
+    minTrainingOutcomeClasses: optionalFiniteOrNull(value.minTrainingOutcomeClasses),
+    minTrainingPolicyRows: optionalFiniteOrNull(value.minTrainingPolicyRows),
+    minTrainingPolicyActionTypes: optionalFiniteOrNull(value.minTrainingPolicyActionTypes),
+    minTrainingUniqueStateHashes: optionalFiniteOrNull(value.minTrainingUniqueStateHashes),
+    maxTrainingDuplicateStateRate: optionalFiniteOrNull(value.maxTrainingDuplicateStateRate),
     minTrainingSides: optionalFiniteOrNull(value.minTrainingSides),
     minTrainingSources: optionalFiniteOrNull(value.minTrainingSources),
     minTrainingReanalysisSamples: optionalFiniteOrNull(value.minTrainingReanalysisSamples),
     minTrainingStateSnapshots: optionalFiniteOrNull(value.minTrainingStateSnapshots),
     minTrainingAverageRootVisits: optionalFiniteOrNull(value.minTrainingAverageRootVisits),
+    minTrainingSelectedActionShare: optionalFiniteOrNull(value.minTrainingSelectedActionShare),
+    minTrainingExplorationShare: optionalFiniteOrNull(value.minTrainingExplorationShare),
     minTrainingValidationSamples: optionalFiniteOrNull(value.minTrainingValidationSamples),
+    minTrainingValidationSides: optionalFiniteOrNull(value.minTrainingValidationSides),
+    minTrainingValidationPhases: optionalFiniteOrNull(value.minTrainingValidationPhases),
+    minTrainingValidationGroups: optionalFiniteOrNull(value.minTrainingValidationGroups),
+    requiredTrainingValidationGroupBy: stringOrNull(value.requiredTrainingValidationGroupBy),
     maxTrainingValidationValueMse: optionalFiniteOrNull(value.maxTrainingValidationValueMse),
+    maxTrainingValidationValueCalibrationBias: optionalFiniteOrNull(value.maxTrainingValidationValueCalibrationBias),
     maxTrainingValidationPolicyCrossEntropy: optionalFiniteOrNull(value.maxTrainingValidationPolicyCrossEntropy),
+    minTrainingValidationPolicyTopChoiceAccuracy: optionalFiniteOrNull(value.minTrainingValidationPolicyTopChoiceAccuracy),
+    promotionVerdict: normalizePromotionVerdict(value.promotionVerdict),
+    sideScoreDeltaPass: value.sideScoreDeltaPass !== false,
     scoreLowerBoundPass: value.scoreLowerBoundPass !== false,
+    eloLowerBoundPass: value.eloLowerBoundPass !== false,
+    drawRatePass: value.drawRatePass !== false,
+    decisiveRatePass: value.decisiveRatePass !== false,
     arena: normalizeReleaseArena(value.arena),
     decisionEvidence: normalizeDecisionEvidence(value.decisionEvidence),
+    referenceArena: normalizeReferenceArena(value.referenceArena),
     errors: finiteNumber(value.errors, 0),
     activeGeneration: finiteOrNull(value.activeGeneration),
     evaluationSuite: normalizeReleaseSuiteEvidence(value.evaluationSuite),
     sideScores: normalizeReleaseSideScores(value.sideScores),
     runtime: normalizeRuntimeInstallEvidence(value.runtime),
+  };
+}
+
+export function normalizeAlphaTrainingProfileEvidence(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if (value.schema !== ALPHA_TRAINING_PROFILE_EVIDENCE_SCHEMA) return null;
+  const profile = stringOrNull(value.profile);
+  if (!profile) return null;
+  return {
+    schema: ALPHA_TRAINING_PROFILE_EVIDENCE_SCHEMA,
+    profile,
+    selfPlayOptions: normalizeTrainingProfileOptions(value.selfPlayOptions),
+    replayBufferOptions: normalizeTrainingProfileOptions(value.replayBufferOptions),
+    reanalysisOptions: normalizeTrainingProfileOptions(value.reanalysisOptions),
+    trainingOptions: normalizeTrainingProfileOptions(value.trainingOptions),
+    releaseGate: normalizeTrainingProfileOptions(value.releaseGate),
   };
 }
 
@@ -460,6 +858,26 @@ function normalizeRuntimeInstallEvidence(value) {
     modelFile: typeof value.modelFile === "string" ? value.modelFile : null,
     installApproved: Boolean(value.installApproved),
   };
+}
+
+function normalizeTrainingProfileOptions(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const entries = Object.entries(value)
+    .map(([key, raw]) => [String(key), normalizeTrainingProfileOptionValue(raw)])
+    .filter(([, normalized]) => normalized !== undefined);
+  return Object.fromEntries(entries);
+}
+
+function normalizeTrainingProfileOptionValue(value) {
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    const numeric = Number(trimmed);
+    return trimmed !== "" && Number.isFinite(numeric) ? numeric : value;
+  }
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  if (value && typeof value === "object" && !Array.isArray(value)) return normalizeTrainingProfileOptions(value);
+  return undefined;
 }
 
 export function normalizeAlphaTrainingMetadata(value) {
@@ -482,6 +900,7 @@ function normalizeReleaseSuiteEvidence(value) {
       games: 0,
       sides: 0,
       seeds: 0,
+      phaseCoverage: emptyPhaseCoverageEvidence(),
       fixedPositions: 0,
       challengePositions: 0,
       challengeQuality: null,
@@ -494,10 +913,34 @@ function normalizeReleaseSuiteEvidence(value) {
     games: finiteNumber(value.games, 0),
     sides: finiteNumber(value.sides, 0),
     seeds: finiteNumber(value.seeds, 0),
+    phaseCoverage: normalizePhaseCoverage(value.phaseCoverage),
     fixedPositions: finiteNumber(value.fixedPositions, 0),
     challengePositions: finiteNumber(value.challengePositions, 0),
     challengeQuality: normalizeChallengeQuality(value.challengeQuality),
     challengeSelection: normalizeChallengeSelection(value.challengeSelection),
+  };
+}
+
+function normalizePhaseCoverage(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return emptyPhaseCoverageEvidence();
+  const counts = normalizeCountMap(value.counts);
+  const ids = Array.isArray(value.ids)
+    ? [...new Set(value.ids.map(String).filter(Boolean))].sort()
+    : Object.keys(counts).sort();
+  return {
+    schema: typeof value.schema === "string" ? value.schema : "zizi-el-alamein-alpha-release-phase-coverage-v1",
+    phases: finiteNumber(value.phases, ids.length),
+    ids,
+    counts: Object.fromEntries(ids.map((id) => [id, counts[id] || 0]).filter(([, count]) => count > 0)),
+  };
+}
+
+function emptyPhaseCoverageEvidence() {
+  return {
+    schema: "zizi-el-alamein-alpha-release-phase-coverage-v1",
+    phases: 0,
+    ids: [],
+    counts: {},
   };
 }
 
@@ -507,13 +950,148 @@ function normalizeChallengeQuality(value) {
     schema: typeof value.schema === "string" ? value.schema : "zizi-el-alamein-alpha-challenge-quality-v1",
     samples: finiteNumber(value.samples, 0),
     averagePriority: finiteOrNull(value.averagePriority),
+    averageRuntimeRisk: finiteOrNull(value.averageRuntimeRisk),
+    runtimeRiskPositions: finiteNumber(value.runtimeRiskPositions, 0),
+    runtimeRecommendations: finiteNumber(value.runtimeRecommendations, 0),
+    runtimeRejectedRecommendations: finiteNumber(value.runtimeRejectedRecommendations, 0),
+    runtimeCandidateFallbacks: finiteNumber(value.runtimeCandidateFallbacks, 0),
+    runtimeIllegalCandidatesSkipped: finiteNumber(value.runtimeIllegalCandidatesSkipped, 0),
     averagePolicyEntropy: finiteOrNull(value.averagePolicyEntropy),
+    averageRecommendationConfidence: finiteOrNull(value.averageRecommendationConfidence),
+    averageRecommendationVisitMargin: finiteOrNull(value.averageRecommendationVisitMargin),
+    averageRecommendationQMargin: finiteOrNull(value.averageRecommendationQMargin),
+    averageRecommendationUncertainty: finiteOrNull(value.averageRecommendationUncertainty),
     averageTemperature: finiteOrNull(value.averageTemperature),
     averageRootNoiseWeight: finiteOrNull(value.averageRootNoiseWeight),
     averageSearchIterations: finiteOrNull(value.averageSearchIterations),
     averageRootVisits: finiteOrNull(value.averageRootVisits),
+    recommendationLabels: normalizeCountMap(value.recommendationLabels),
     selectionModes: normalizeCountMap(value.selectionModes),
   };
+}
+
+function normalizeReferenceArena(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      schema: "zizi-el-alamein-alpha-reference-arena-evidence-v1",
+      references: 0,
+      scoredReferences: 0,
+      minCandidateScore: null,
+      averageCandidateScore: null,
+      errors: 0,
+      entries: [],
+    };
+  }
+  const entries = Array.isArray(value.entries)
+    ? value.entries.map(normalizeReferenceArenaEntry).filter(Boolean)
+    : [];
+  return {
+    schema: typeof value.schema === "string" ? value.schema : "zizi-el-alamein-alpha-reference-arena-evidence-v1",
+    references: finiteNumber(value.references, entries.length),
+    scoredReferences: finiteNumber(value.scoredReferences, entries.filter((entry) => entry.scoredGames > 0).length),
+    minCandidateScore: finiteOrNull(value.minCandidateScore),
+    averageCandidateScore: finiteOrNull(value.averageCandidateScore),
+    errors: finiteNumber(value.errors, entries.reduce((sum, entry) => sum + Number(entry.errors || 0), 0)),
+    entries,
+  };
+}
+
+function normalizeReferenceArenaEntry(value, index = 0) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return {
+    schema: typeof value.schema === "string" ? value.schema : "zizi-el-alamein-alpha-reference-arena-entry-evidence-v1",
+    index: finiteNumber(value.index, index),
+    label: typeof value.label === "string" && value.label ? value.label : `reference-${index + 1}`,
+    source: typeof value.source === "string" ? value.source : null,
+    modelPresent: Boolean(value.modelPresent),
+    games: finiteNumber(value.games, 0),
+    scoredGames: finiteNumber(value.scoredGames, 0),
+    candidateScore: finiteOrNull(value.candidateScore),
+    errors: finiteNumber(value.errors, 0),
+    arena: normalizeReleaseArena(value.arena),
+  };
+}
+
+function challengeQualityGate(quality, options = {}) {
+  const minAverageUncertainty = optionalFiniteOrNull(options.minChallengeAverageRecommendationUncertainty);
+  const minContestedPositions = optionalFiniteOrNull(options.minContestedChallengePositions);
+  const minAverageRuntimeRisk = optionalFiniteOrNull(options.minChallengeAverageRuntimeRisk);
+  const minRuntimeRiskPositions = optionalFiniteOrNull(options.minRuntimeRiskChallengePositions);
+  if (
+    minAverageUncertainty === null
+    && minContestedPositions === null
+    && minAverageRuntimeRisk === null
+    && minRuntimeRiskPositions === null
+  ) return { ok: true, reason: null };
+  if (!quality) return { ok: false, reason: "missing_challenge_quality_evidence" };
+  if (
+    minAverageUncertainty !== null
+    && (
+      quality.averageRecommendationUncertainty === null
+      || quality.averageRecommendationUncertainty === undefined
+      || Number(quality.averageRecommendationUncertainty) < minAverageUncertainty
+    )
+  ) {
+    return { ok: false, reason: "challenge_average_uncertainty_too_low" };
+  }
+  if (
+    minContestedPositions !== null
+    && Number(quality.recommendationLabels?.contested || 0) < minContestedPositions
+  ) {
+    return { ok: false, reason: "challenge_contested_positions_too_few" };
+  }
+  if (
+    minAverageRuntimeRisk !== null
+    && (
+      quality.averageRuntimeRisk === null
+      || quality.averageRuntimeRisk === undefined
+      || Number(quality.averageRuntimeRisk) < minAverageRuntimeRisk
+    )
+  ) {
+    return { ok: false, reason: "challenge_average_runtime_risk_too_low" };
+  }
+  if (
+    minRuntimeRiskPositions !== null
+    && Number(quality.runtimeRiskPositions || 0) < minRuntimeRiskPositions
+  ) {
+    return { ok: false, reason: "challenge_runtime_risk_positions_too_few" };
+  }
+  return { ok: true, reason: null };
+}
+
+function trainingProfileGate(profile, requiredProfile = null) {
+  const required = stringOrNull(requiredProfile);
+  if (required === null) return { ok: true, reason: null };
+  const evidence = normalizeAlphaTrainingProfileEvidence(profile);
+  if (!evidence) return { ok: false, reason: "missing_training_profile_evidence" };
+  if (evidence.profile !== required) return { ok: false, reason: "training_profile_mismatch" };
+  return { ok: true, reason: null };
+}
+
+function referenceArenaGate(arena, options = {}) {
+  const minScore = optionalFiniteOrNull(options.minReferenceArenaScore);
+  const minReferences = optionalFiniteOrNull(options.minReferenceArenaReferences);
+  const maxErrors = optionalFiniteOrNull(options.maxReferenceArenaErrors);
+  if (minScore === null && minReferences === null && maxErrors === null) return { ok: true, reason: null };
+  const evidence = normalizeReferenceArena(arena);
+  if (!evidence.references) return { ok: false, reason: "missing_reference_arena_evidence" };
+  if (minReferences !== null && Number(evidence.scoredReferences || 0) < minReferences) {
+    return { ok: false, reason: "reference_arena_too_few_references" };
+  }
+  if (maxErrors !== null && Number(evidence.errors || 0) > maxErrors) {
+    return { ok: false, reason: "reference_arena_errors_exceed_limit" };
+  }
+  if (
+    minScore !== null
+    && (
+      evidence.minCandidateScore === null
+      || evidence.minCandidateScore === undefined
+      || Number(evidence.minCandidateScore) < minScore
+    )
+  ) {
+    return { ok: false, reason: "reference_arena_score_below_threshold" };
+  }
+  return { ok: true, reason: null };
 }
 
 function normalizeChallengeSelection(value) {
@@ -544,9 +1122,59 @@ function normalizeReleaseSideScores(value) {
       errors: finiteNumber(entry?.errors, 0),
       scoredGames: finiteNumber(entry?.scoredGames, 0),
       candidateScore: finiteNumber(entry?.candidateScore, 0),
+      baselineScore: optionalFiniteOrNull(entry?.baselineScore),
+      scoreDelta: optionalFiniteOrNull(entry?.scoreDelta),
       arena: normalizeReleaseArena(entry?.arena),
     }))
     .filter((entry) => entry.candidateSide);
+}
+
+function normalizePromotionVerdict(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const gates = Array.isArray(value.gates)
+    ? value.gates
+      .map(normalizePromotionGate)
+      .filter(Boolean)
+    : [];
+  return {
+    schema: typeof value.schema === "string" ? value.schema : "zizi-el-alamein-alpha-promotion-verdict-v1",
+    ok: typeof value.ok === "boolean" ? value.ok : (gates.length > 0 && gates.every((gate) => gate.ok)),
+    reason: typeof value.reason === "string" && value.reason ? value.reason : null,
+    gates,
+  };
+}
+
+function promotionVerdictGate(value) {
+  const promotionVerdict = normalizePromotionVerdict(value);
+  if (!promotionVerdict) {
+    return { ok: true, reason: null, promotionVerdict: null };
+  }
+  const failedGate = promotionVerdict.gates.find((gate) => gate.ok === false);
+  if (!promotionVerdict.ok || failedGate) {
+    return {
+      ok: false,
+      reason: "promotion_verdict_failed",
+      promotionVerdict,
+    };
+  }
+  return {
+    ok: true,
+    reason: null,
+    promotionVerdict,
+  };
+}
+
+function normalizePromotionGate(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || typeof value.key !== "string") return null;
+  return {
+    key: value.key,
+    ok: Boolean(value.ok),
+    required: value.required !== false,
+    actual: finiteOrNull(value.actual),
+    threshold: finiteOrNull(value.threshold),
+    comparison: typeof value.comparison === "string" && value.comparison ? value.comparison : "min",
+    reason: typeof value.reason === "string" && value.reason ? value.reason : null,
+  };
 }
 
 function normalizeDecisionEvidence(value) {
@@ -562,11 +1190,16 @@ function normalizeDecisionEvidence(value) {
     chanceActions: finiteNumber(value.chanceActions, 0),
     fallbackActions: finiteNumber(value.fallbackActions, 0),
     averagePolicyEntropy: finiteOrNull(value.averagePolicyEntropy),
+    averageRecommendationConfidence: finiteOrNull(value.averageRecommendationConfidence),
+    averageRecommendationVisitMargin: finiteOrNull(value.averageRecommendationVisitMargin),
+    averageRecommendationQMargin: finiteOrNull(value.averageRecommendationQMargin),
+    averageRecommendationUncertainty: finiteOrNull(value.averageRecommendationUncertainty),
     averageSearchIterations: finiteOrNull(value.averageSearchIterations),
     averageRootVisits: finiteOrNull(value.averageRootVisits),
     selectedActionShare: finiteOrNull(value.selectedActionShare),
     actionTypes: normalizeCountMap(value.actionTypes),
     selectionModes: normalizeCountMap(value.selectionModes),
+    recommendationLabels: normalizeCountMap(value.recommendationLabels),
     roles: {
       candidate: normalizeRoleDecisionEvidence(value.roles?.candidate),
       baseline: normalizeRoleDecisionEvidence(value.roles?.baseline),
@@ -581,9 +1214,14 @@ function normalizeRoleDecisionEvidence(value) {
       decisionCount: 0,
       analyzedActions: 0,
       averagePolicyEntropy: null,
+      averageRecommendationConfidence: null,
+      averageRecommendationVisitMargin: null,
+      averageRecommendationQMargin: null,
+      averageRecommendationUncertainty: null,
       averageSearchIterations: null,
       averageRootVisits: null,
       selectedActionShare: null,
+      recommendationLabels: {},
       actionTypes: {},
     };
   }
@@ -592,9 +1230,14 @@ function normalizeRoleDecisionEvidence(value) {
     decisionCount: finiteNumber(value.decisionCount, 0),
     analyzedActions: finiteNumber(value.analyzedActions, 0),
     averagePolicyEntropy: finiteOrNull(value.averagePolicyEntropy),
+    averageRecommendationConfidence: finiteOrNull(value.averageRecommendationConfidence),
+    averageRecommendationVisitMargin: finiteOrNull(value.averageRecommendationVisitMargin),
+    averageRecommendationQMargin: finiteOrNull(value.averageRecommendationQMargin),
+    averageRecommendationUncertainty: finiteOrNull(value.averageRecommendationUncertainty),
     averageSearchIterations: finiteOrNull(value.averageSearchIterations),
     averageRootVisits: finiteOrNull(value.averageRootVisits),
     selectedActionShare: finiteOrNull(value.selectedActionShare),
+    recommendationLabels: normalizeCountMap(value.recommendationLabels),
     actionTypes: normalizeCountMap(value.actionTypes),
   };
 }
@@ -680,13 +1323,36 @@ function normalizeTrainingDataSummary(value) {
     phases: normalizeTrainingCountMap(value.phases),
     outcomeSources: normalizeTrainingCountMap(value.outcomeSources),
     selectionModes: normalizeTrainingCountMap(value.selectionModes),
+    valueSamples: finiteCount(value.valueSamples),
+    outcomeBuckets: normalizeTrainingCountMap(value.outcomeBuckets),
+    outcomeClassCount: finiteCount(value.outcomeClassCount),
+    averageOutcome: finiteOrNull(value.averageOutcome),
     samplesWithPolicy: finiteCount(value.samplesWithPolicy),
+    policyRows: finiteCount(value.policyRows),
+    policyActionTypes: normalizeTrainingCountMap(value.policyActionTypes),
+    policyActionTypeCount: finiteCount(value.policyActionTypeCount),
+    stateHashSamples: finiteCount(value.stateHashSamples),
+    uniqueStateHashes: finiteCount(value.uniqueStateHashes),
+    duplicateStateSamples: finiteCount(value.duplicateStateSamples),
+    stateHashCoverage: finiteOrNull(value.stateHashCoverage),
+    duplicateStateRate: finiteOrNull(value.duplicateStateRate),
     samplesWithDecision: finiteCount(value.samplesWithDecision),
+    sampledDecisionCount: finiteCount(value.sampledDecisionCount),
+    explorationDecisionCount: finiteCount(value.explorationDecisionCount),
+    explorationDecisionShare: finiteOrNull(value.explorationDecisionShare),
+    temperatureDecisionCount: finiteCount(value.temperatureDecisionCount),
+    rootNoiseDecisionCount: finiteCount(value.rootNoiseDecisionCount),
+    nonBestSelectedActions: finiteCount(value.nonBestSelectedActions),
     samplesWithStateSnapshot: finiteCount(value.samplesWithStateSnapshot),
     reanalysisSamples: finiteCount(value.reanalysisSamples),
     averageOutcomeWeight: finiteOrNull(value.averageOutcomeWeight),
     averageRootVisits: finiteOrNull(value.averageRootVisits),
+    averageTemperature: finiteOrNull(value.averageTemperature),
+    averageRootNoiseWeight: finiteOrNull(value.averageRootNoiseWeight),
     averagePolicyEntropy: finiteOrNull(value.averagePolicyEntropy),
+    averageSelectedVisitShare: finiteOrNull(value.averageSelectedVisitShare),
+    averageSelectedPolicyRank: finiteOrNull(value.averageSelectedPolicyRank),
+    selectedBestActions: finiteCount(value.selectedBestActions),
   };
 }
 
@@ -701,6 +1367,17 @@ function normalizeTrainingValidation(value) {
     trainingGroups: finiteCount(value.trainingGroups),
     validationGroups: finiteCount(value.validationGroups),
     trainingSamples: finiteCount(value.trainingSamples),
+    explicitValidation: Boolean(value.explicitValidation),
+    stateHashOverlapCount: nonnegativeIntegerOrNull(value.stateHashOverlapCount),
+    crossSplitComponentCount: nonnegativeIntegerOrNull(value.crossSplitComponentCount),
+    environmentFingerprint: canonicalFingerprintOrNull(value.environmentFingerprint),
+    trainingArtifactFingerprint: canonicalFingerprintOrNull(value.trainingArtifactFingerprint),
+    validationArtifactFingerprint: canonicalFingerprintOrNull(value.validationArtifactFingerprint),
+    trainingFileSha256: canonicalFingerprintOrNull(value.trainingFileSha256),
+    validationFileSha256: canonicalFingerprintOrNull(value.validationFileSha256),
+    trainingTrajectories: nonnegativeIntegerOrNull(value.trainingTrajectories),
+    validationTrajectories: nonnegativeIntegerOrNull(value.validationTrajectories),
+    trajectoryOverlapCount: nonnegativeIntegerOrNull(value.trajectoryOverlapCount),
     sampleCount: finiteCount(value.sampleCount),
     sides: normalizeTrainingCountMap(value.sides),
     phases: normalizeTrainingCountMap(value.phases),
@@ -909,6 +1586,7 @@ function compactScenarioUnitForEnvironment(unit) {
     id: stringOrNull(unit?.id),
     side: stringOrNull(unit?.side),
     type: stringOrNull(unit?.type),
+    combat: finiteOrNull(unit?.combat),
     attack: finiteOrNull(unit?.attack),
     defense: finiteOrNull(unit?.defense),
     movement: finiteOrNull(unit?.movement),
@@ -948,16 +1626,64 @@ function alphaEnvironmentHash(value) {
 function trainingDataGate(data, options = {}) {
   const thresholds = {
     minTrainingSamples: optionalFiniteOrNull(options.minTrainingSamples),
+    minTrainingValueSamples: optionalFiniteOrNull(options.minTrainingValueSamples),
+    minTrainingOutcomeClasses: optionalFiniteOrNull(options.minTrainingOutcomeClasses),
+    minTrainingPolicyRows: optionalFiniteOrNull(options.minTrainingPolicyRows),
+    minTrainingPolicyActionTypes: optionalFiniteOrNull(options.minTrainingPolicyActionTypes),
+    minTrainingUniqueStateHashes: optionalFiniteOrNull(options.minTrainingUniqueStateHashes),
+    maxTrainingDuplicateStateRate: optionalFiniteOrNull(options.maxTrainingDuplicateStateRate),
     minTrainingSides: optionalFiniteOrNull(options.minTrainingSides),
     minTrainingSources: optionalFiniteOrNull(options.minTrainingSources),
     minTrainingReanalysisSamples: optionalFiniteOrNull(options.minTrainingReanalysisSamples),
     minTrainingStateSnapshots: optionalFiniteOrNull(options.minTrainingStateSnapshots),
     minTrainingAverageRootVisits: optionalFiniteOrNull(options.minTrainingAverageRootVisits),
+    minTrainingSelectedActionShare: optionalFiniteOrNull(options.minTrainingSelectedActionShare),
+    minTrainingExplorationShare: optionalFiniteOrNull(options.minTrainingExplorationShare),
   };
   if (Object.values(thresholds).every((value) => value === null)) return { ok: true, reason: null };
   if (!data) return { ok: false, reason: "missing_training_data_evidence" };
   if (thresholds.minTrainingSamples !== null && Number(data.sampleCount || 0) < thresholds.minTrainingSamples) {
     return { ok: false, reason: "training_samples_too_few" };
+  }
+  if (
+    thresholds.minTrainingValueSamples !== null
+    && Number(data.valueSamples || 0) < thresholds.minTrainingValueSamples
+  ) {
+    return { ok: false, reason: "training_value_samples_too_few" };
+  }
+  if (
+    thresholds.minTrainingOutcomeClasses !== null
+    && Number(data.outcomeClassCount ?? countPositiveKeys(data.outcomeBuckets)) < thresholds.minTrainingOutcomeClasses
+  ) {
+    return { ok: false, reason: "training_outcome_coverage_too_narrow" };
+  }
+  if (
+    thresholds.minTrainingPolicyRows !== null
+    && Number(data.policyRows || 0) < thresholds.minTrainingPolicyRows
+  ) {
+    return { ok: false, reason: "training_policy_rows_too_few" };
+  }
+  if (
+    thresholds.minTrainingPolicyActionTypes !== null
+    && Number(data.policyActionTypeCount ?? countPositiveKeys(data.policyActionTypes)) < thresholds.minTrainingPolicyActionTypes
+  ) {
+    return { ok: false, reason: "training_policy_action_coverage_too_narrow" };
+  }
+  if (
+    thresholds.minTrainingUniqueStateHashes !== null
+    && Number(data.uniqueStateHashes || 0) < thresholds.minTrainingUniqueStateHashes
+  ) {
+    return { ok: false, reason: "training_unique_states_too_few" };
+  }
+  if (
+    thresholds.maxTrainingDuplicateStateRate !== null
+    && (
+      data.duplicateStateRate === null
+      || data.duplicateStateRate === undefined
+      || Number(data.duplicateStateRate) > thresholds.maxTrainingDuplicateStateRate
+    )
+  ) {
+    return { ok: false, reason: "training_duplicate_state_rate_too_high" };
   }
   if (thresholds.minTrainingSides !== null && Object.keys(data.sides || {}).length < thresholds.minTrainingSides) {
     return { ok: false, reason: "training_side_coverage_too_narrow" };
@@ -983,25 +1709,148 @@ function trainingDataGate(data, options = {}) {
   ) {
     return { ok: false, reason: "training_root_visits_too_low" };
   }
+  if (
+    thresholds.minTrainingSelectedActionShare !== null
+    && (
+      data.averageSelectedVisitShare === null
+      || data.averageSelectedVisitShare === undefined
+      || Number(data.averageSelectedVisitShare || 0) < thresholds.minTrainingSelectedActionShare
+    )
+  ) {
+    return { ok: false, reason: "training_selected_action_share_too_low" };
+  }
+  const explorationShare = trainingExplorationShare(data);
+  if (
+    thresholds.minTrainingExplorationShare !== null
+    && (explorationShare === null || explorationShare < thresholds.minTrainingExplorationShare)
+  ) {
+    return { ok: false, reason: "training_exploration_share_too_low" };
+  }
   return { ok: true, reason: null };
+}
+
+function trainingExplorationShare(data) {
+  const recorded = Number(data?.explorationDecisionShare);
+  if (Number.isFinite(recorded)) return recorded;
+  const decisions = Number(data?.samplesWithDecision || 0);
+  if (!(decisions > 0)) return null;
+  const modes = data?.selectionModes || {};
+  const sampled = Number(data?.sampledDecisionCount ?? 0)
+    || Number(modes.sampled || 0) + Number(modes.sampled_best || 0);
+  const explored = Number(data?.explorationDecisionCount ?? sampled);
+  if (!Number.isFinite(explored)) return null;
+  return explored / decisions;
+}
+
+function decisionFallbackRate(evidence) {
+  const decisions = Number(evidence?.decisionCount ?? evidence?.actionCount ?? 0);
+  if (!(decisions > 0)) return null;
+  return Number(evidence?.fallbackActions || 0) / decisions;
+}
+
+function countActionTypes(actionTypes) {
+  return Object.values(actionTypes || {}).filter((count) => Number(count) > 0).length;
+}
+
+function countPositiveKeys(value) {
+  return Object.values(value || {}).filter((count) => Number(count) > 0).length;
 }
 
 function trainingValidationGate(validation, options = {}) {
   const minSamples = optionalFiniteOrNull(options.minTrainingValidationSamples);
+  const minSides = optionalFiniteOrNull(options.minTrainingValidationSides);
+  const minPhases = optionalFiniteOrNull(options.minTrainingValidationPhases);
+  const minGroups = optionalFiniteOrNull(options.minTrainingValidationGroups);
+  const requiredGroupBy = stringOrNull(options.requiredTrainingValidationGroupBy);
   const maxValueMse = optionalFiniteOrNull(options.maxTrainingValidationValueMse);
+  const maxValueCalibrationBias = optionalFiniteOrNull(options.maxTrainingValidationValueCalibrationBias);
   const maxPolicyCrossEntropy = optionalFiniteOrNull(options.maxTrainingValidationPolicyCrossEntropy);
-  if (minSamples === null && maxValueMse === null && maxPolicyCrossEntropy === null) {
+  const minPolicyTopChoiceAccuracy = optionalFiniteOrNull(options.minTrainingValidationPolicyTopChoiceAccuracy);
+  if (requiredGroupBy !== null && !SUPPORTED_TRAINING_VALIDATION_GROUP_BY.includes(requiredGroupBy)) {
+    return { ok: false, reason: "unsupported_training_validation_group_by" };
+  }
+  const trajectoryValidation = validation?.validationGroupBy === "trajectory";
+  if (
+    minSamples === null
+    && minSides === null
+    && minPhases === null
+    && minGroups === null
+    && requiredGroupBy === null
+    && maxValueMse === null
+    && maxValueCalibrationBias === null
+    && maxPolicyCrossEntropy === null
+    && minPolicyTopChoiceAccuracy === null
+    && !trajectoryValidation
+  ) {
     return { ok: true, reason: null };
   }
   if (!validation) return { ok: false, reason: "missing_training_validation_evidence" };
+  if (trajectoryValidation && validation.trajectoryOverlapCount === null) {
+    return { ok: false, reason: "missing_training_validation_trajectory_overlap_evidence" };
+  }
+  if (trajectoryValidation && Number(validation.trajectoryOverlapCount) !== 0) {
+    return { ok: false, reason: "training_validation_trajectory_overlap" };
+  }
+  if (validation?.explicitValidation && validation.stateHashOverlapCount === null) {
+    return { ok: false, reason: "missing_training_validation_state_overlap_evidence" };
+  }
+  if (validation?.explicitValidation && Number(validation.stateHashOverlapCount) !== 0) {
+    return { ok: false, reason: "training_validation_state_overlap" };
+  }
+  if (validation?.explicitValidation && validation.crossSplitComponentCount === null) {
+    return { ok: false, reason: "missing_training_validation_component_overlap_evidence" };
+  }
+  if (validation?.explicitValidation && Number(validation.crossSplitComponentCount) !== 0) {
+    return { ok: false, reason: "training_validation_component_overlap" };
+  }
+  if (
+    validation?.explicitValidation
+    && [
+      validation.environmentFingerprint,
+      validation.trainingArtifactFingerprint,
+      validation.validationArtifactFingerprint,
+      validation.trainingFileSha256,
+      validation.validationFileSha256,
+    ].some((fingerprint) => !fingerprint)
+  ) {
+    return { ok: false, reason: "missing_explicit_training_validation_fingerprint" };
+  }
+  if (trajectoryValidation && Number(validation.trainingTrajectories || 0) < 1) {
+    return { ok: false, reason: "training_validation_training_trajectories_too_few" };
+  }
+  if (trajectoryValidation && Number(validation.validationTrajectories || 0) < 1) {
+    return { ok: false, reason: "training_validation_validation_trajectories_too_few" };
+  }
   if (minSamples !== null && Number(validation.sampleCount || 0) < minSamples) {
     return { ok: false, reason: "training_validation_samples_too_few" };
+  }
+  if (minSides !== null && countPositiveKeys(validation.sides) < minSides) {
+    return { ok: false, reason: "training_validation_side_coverage_too_narrow" };
+  }
+  if (minPhases !== null && countPositiveKeys(validation.phases) < minPhases) {
+    return { ok: false, reason: "training_validation_phase_coverage_too_narrow" };
+  }
+  if (minGroups !== null && Number(validation.validationGroups || 0) < minGroups) {
+    return { ok: false, reason: "training_validation_groups_too_few" };
+  }
+  if (requiredGroupBy !== null && validation.validationGroupBy !== requiredGroupBy) {
+    return { ok: false, reason: "training_validation_group_by_mismatch" };
   }
   if (
     maxValueMse !== null
     && (validation.value?.mse === null || validation.value?.mse === undefined || Number(validation.value.mse) > maxValueMse)
   ) {
     return { ok: false, reason: "training_validation_value_mse_too_high" };
+  }
+  if (
+    maxValueCalibrationBias !== null
+    && (
+      validation.value?.calibrationBias === null
+      || validation.value?.calibrationBias === undefined
+      || Math.abs(Number(validation.value.calibrationBias)) > maxValueCalibrationBias
+    )
+  ) {
+    return { ok: false, reason: "training_validation_value_calibration_bias_too_high" };
   }
   if (
     maxPolicyCrossEntropy !== null
@@ -1013,16 +1862,27 @@ function trainingValidationGate(validation, options = {}) {
   ) {
     return { ok: false, reason: "training_validation_policy_cross_entropy_too_high" };
   }
+  if (
+    minPolicyTopChoiceAccuracy !== null
+    && (
+      validation.policy?.topChoiceAccuracy === null
+      || validation.policy?.topChoiceAccuracy === undefined
+      || Number(validation.policy.topChoiceAccuracy) < minPolicyTopChoiceAccuracy
+    )
+  ) {
+    return { ok: false, reason: "training_validation_policy_top_choice_accuracy_too_low" };
+  }
   return { ok: true, reason: null };
 }
 
-function releaseValidationError(reason, model, environment = null, featureContract = null) {
+function releaseValidationError(reason, model, environment = null, featureContract = null, spatialContract = null) {
   return {
     ok: false,
     reason,
     model,
     environment,
     featureContract,
+    spatialContract,
   };
 }
 
@@ -1031,11 +1891,16 @@ function normalizeSubModel(value, schema) {
   if (value.schema !== schema) return null;
   const weights = normalizeWeights(value.weights);
   if (!Object.keys(weights).length) return null;
+  const featureKeys = Array.isArray(value.featureKeys) ? value.featureKeys.map(String) : [];
+  const network = normalizeAlphaDenseNetwork(value.network, featureKeys);
+  if (value.network !== undefined && !network) return null;
   return {
     schema,
     featureScales: normalizeNumberMap(value.featureScales),
-    featureKeys: Array.isArray(value.featureKeys) ? value.featureKeys.map(String) : [],
+    featureKeys,
     weights,
+    architecture: network ? "dense-residual-v1" : "linear-v1",
+    ...(network ? { network } : {}),
     metrics: normalizeMetrics(value.metrics),
   };
 }
@@ -1086,9 +1951,22 @@ function finiteCount(value) {
   return Number.isFinite(next) ? Math.max(0, Math.floor(next)) : 0;
 }
 
+function nonnegativeIntegerOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const next = Number(value);
+  return Number.isInteger(next) && next >= 0 ? next : null;
+}
+
 function normalizeSourceHash(value) {
   if (typeof value !== "string") return null;
   const next = value.trim().toLowerCase();
+  return /^sha256:[a-f0-9]{64}$/.test(next) ? next : null;
+}
+
+function canonicalFingerprintOrNull(value) {
+  if (typeof value !== "string") return null;
+  const next = value.trim().toLowerCase();
+  if (/^[a-f0-9]{64}$/.test(next)) return `sha256:${next}`;
   return /^sha256:[a-f0-9]{64}$/.test(next) ? next : null;
 }
 
