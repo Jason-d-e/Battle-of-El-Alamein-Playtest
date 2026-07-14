@@ -31,6 +31,7 @@
   const OPPOSITE_SIDE = { axis: "allied", allied: "axis" };
   const coreRulesPromise = import("./src/core/index.js?v=20260709-zoc-step-1");
   const phaseFlowPromise = import("./src/app/phase-flow.js?v=20260714-empty-movement-confirm-1");
+  const menuModeSelectionPromise = import("./src/app/game-mode-selection.js?v=20260714-online-menu-fix-1");
   const aiHeuristicsPromise = import("./src/app/ai-heuristics.js?v=20260708-ai-heuristics-16");
   const aiPhaseSearchPromise = import("./src/app/ai-phase-search.js?v=20260709-ai-projection-1");
   const aiTacticsPromise = import("./src/app/ai-tactics.js?v=20260708-ai-tactics-1");
@@ -43,7 +44,7 @@
   const onlineModulesPromise = Promise.all([
     import("./src/app/supabase-online-transport.js?v=20260714-friend-playtest-1"),
     import("./src/app/online-game-bridge.js?v=20260714-friend-playtest-1"),
-    import("./src/ui/online-multiplayer-panel.js?v=20260714-friend-playtest-1"),
+    import("./src/ui/online-multiplayer-panel.js?v=20260714-online-menu-fix-1"),
   ]).then(([transport, bridge, panel]) => ({ transport, bridge, panel }));
   const aiAlphaModelPromise = Promise.resolve(null);
   const HIGHLIGHT = {
@@ -521,11 +522,109 @@
   Object.assign(I18N.zh.menu, {
     modeLabel: "选择模式",
     hotseatMode: "热座模式",
+    onlineMode: "好友联机测试",
   });
   Object.assign(I18N.en.menu, {
     modeLabel: "Choose Mode",
     hotseatMode: "Hotseat Mode",
+    onlineMode: "Friend Match",
   });
+  I18N.zh.online = {
+    setupAria: "好友联机设置",
+    guideTitle: "好友联机步骤",
+    stepOpen: "两位玩家都打开这个联机测试版，并选择“好友联机测试”。",
+    stepConfigure: "双方输入相同的 Project URL 和 publishable key，然后连接测试服务器。",
+    stepRoom: "房主选择阵营并创建房间，把房间码发给好友；好友选择另一阵营并加入。",
+    stepReady: "双方都点击“准备”，房间会自动开始。轮到自己的阵营时才能操作。",
+    sessionNote: "配置只保留在当前浏览器标签页的临时会话中，不写入游戏存档。",
+    projectUrlLabel: "Supabase 项目 URL",
+    publishableKeyLabel: "Publishable key（不要使用 secret/service-role key）",
+    connect: "连接测试服务器",
+    switchConfigBlocked: "请先离开当前房间，再更换联机配置。",
+    configRequired: "请输入 Project URL 和 publishable key。",
+    connecting: "正在建立匿名测试会话……",
+    syncFailed: "同步失败：{reason}",
+    operationFailed: "{code}：{reason}",
+    connected: "已连接测试服务器。可创建房间，或输入好友房间码加入。",
+    restoredRoom: "已恢复房间 {roomCode}。",
+    restoreFailed: "旧房间无法恢复：{reason}",
+    roomAbandoned: "房间 {roomCode} 已中止。",
+    roomExpired: "房间 {roomCode} 已过期。",
+    offlineSwitchBlocked: "请先离开当前联机房间，再切换离线模式。",
+    startFromReady: "联机房间由准备状态启动；不会覆盖本地战役。",
+    panel: {
+      title: "好友联机测试",
+      roomCode: "房间码",
+      axis: "轴心国",
+      allied: "英军",
+      create: "创建房间",
+      join: "加入房间",
+      ready: "准备",
+      notReady: "取消准备",
+      reconnect: "重新连接",
+      leave: "离开房间",
+      offline: "离线",
+      connecting: "正在连接",
+      connected: "已连接",
+      disconnected: "已断开",
+      error: "联机错误",
+      lobby: "房间大厅",
+      active: "对局进行中",
+      finished: "对局已结束",
+      abandoned: "房间已中止",
+      expired: "房间已过期",
+      empty: "空位",
+      occupied: "已占用",
+    },
+  };
+  I18N.en.online = {
+    setupAria: "Friend match setup",
+    guideTitle: "Friend match steps",
+    stepOpen: "Both players open this online playtest and choose “Friend Match”.",
+    stepConfigure: "Enter the same Project URL and publishable key, then connect to the test server.",
+    stepRoom: "The host chooses a side and creates a room, then sends the room code to the friend, who joins as the other side.",
+    stepReady: "Both players select “Ready”. The match starts automatically, and only the active side can act.",
+    sessionNote: "Configuration stays only in this browser tab's temporary session and is never written to a game save.",
+    projectUrlLabel: "Supabase Project URL",
+    publishableKeyLabel: "Publishable key (never use a secret/service-role key)",
+    connect: "Connect to test server",
+    switchConfigBlocked: "Leave the current room before changing the online configuration.",
+    configRequired: "Enter the Project URL and publishable key.",
+    connecting: "Starting an anonymous test session…",
+    syncFailed: "Sync failed: {reason}",
+    operationFailed: "{code}: {reason}",
+    connected: "Connected to the test server. Create a room or enter a friend's room code to join.",
+    restoredRoom: "Restored room {roomCode}.",
+    restoreFailed: "The previous room could not be restored: {reason}",
+    roomAbandoned: "Room {roomCode} was abandoned.",
+    roomExpired: "Room {roomCode} expired.",
+    offlineSwitchBlocked: "Leave the current online room before switching to an offline mode.",
+    startFromReady: "Online matches start when both players are ready and never overwrite a local campaign.",
+    panel: {
+      title: "Friend Match",
+      roomCode: "Room code",
+      axis: "Axis",
+      allied: "Allied",
+      create: "Create room",
+      join: "Join room",
+      ready: "Ready",
+      notReady: "Not ready",
+      reconnect: "Reconnect",
+      leave: "Leave room",
+      offline: "Offline",
+      connecting: "Connecting",
+      connected: "Connected",
+      disconnected: "Disconnected",
+      error: "Online error",
+      lobby: "Lobby",
+      active: "Match active",
+      finished: "Match finished",
+      abandoned: "Room abandoned",
+      expired: "Room expired",
+      empty: "Open",
+      occupied: "Occupied",
+    },
+  };
   Object.assign(I18N.zh.ui, {
     exportHumanDemonstration: "\u5bfc\u51fa\u4eba\u7c7b\u793a\u8303",
     aiThinking: "AI \u6b63\u5728\u6307\u6325 {side}",
@@ -634,6 +733,7 @@
   const app = {
     core: null,
     phaseFlow: null,
+    menuModeSelection: null,
     aiHeuristics: null,
     aiPhaseSearch: null,
     aiTactics: null,
@@ -685,6 +785,7 @@
       lastAppliedRevision: null,
       submitting: false,
       hadRoom: false,
+      setupStatus: null,
     },
   };
 
@@ -839,6 +940,34 @@
     const table = I18N[app.lang] || I18N.zh;
     const value = key.split(".").reduce((node, part) => node?.[part], table) ?? key;
     return String(value).replace(/\{(\w+)\}/g, (_, name) => params[name] ?? "");
+  }
+
+  function onlinePanelLabels() {
+    const keys = [
+      "title",
+      "roomCode",
+      "axis",
+      "allied",
+      "create",
+      "join",
+      "ready",
+      "notReady",
+      "reconnect",
+      "leave",
+      "offline",
+      "connecting",
+      "connected",
+      "disconnected",
+      "error",
+      "lobby",
+      "active",
+      "finished",
+      "abandoned",
+      "expired",
+      "empty",
+      "occupied",
+    ];
+    return Object.fromEntries(keys.map((key) => [key, tr(`online.panel.${key}`)]));
   }
 
   function phase() {
@@ -1560,6 +1689,7 @@
       const [
         core,
         phaseFlow,
+        menuModeSelection,
         aiHeuristics,
         aiPhaseSearch,
         aiTactics,
@@ -1576,6 +1706,7 @@
       ] = await Promise.all([
         coreRulesPromise,
         phaseFlowPromise,
+        menuModeSelectionPromise,
         aiHeuristicsPromise,
         aiPhaseSearchPromise,
         aiTacticsPromise,
@@ -1592,6 +1723,7 @@
       ]);
       app.core = core;
       app.phaseFlow = phaseFlow;
+      app.menuModeSelection = menuModeSelection;
       app.aiHeuristics = aiHeuristics;
       app.aiPhaseSearch = aiPhaseSearch;
       app.aiTactics = aiTactics;
@@ -1728,8 +1860,25 @@
   }
 
   function setOnlineSetupStatus(message = "", isError = false) {
-    el.onlineSetupStatus.textContent = message;
-    el.onlineSetupStatus.dataset.error = String(Boolean(isError));
+    app.online.setupStatus = message ? { message, isError: Boolean(isError) } : null;
+    renderOnlineSetupStatus();
+  }
+
+  function setOnlineSetupStatusI18n(key = "", params = {}, isError = false) {
+    app.online.setupStatus = key
+      ? { key, params: { ...params }, isError: Boolean(isError) }
+      : null;
+    renderOnlineSetupStatus();
+  }
+
+  function renderOnlineSetupStatus() {
+    const setupStatus = app.online.setupStatus;
+    el.onlineSetupStatus.textContent = setupStatus
+      ? setupStatus.key
+        ? tr(setupStatus.key, setupStatus.params)
+        : setupStatus.message
+      : "";
+    el.onlineSetupStatus.dataset.error = String(Boolean(setupStatus?.isError));
   }
 
   function readRememberedOnlineRoom() {
@@ -1772,19 +1921,19 @@
   async function connectOnlineTestServer() {
     if (app.online.connecting) return;
     if (hasOnlineRoom()) {
-      setOnlineSetupStatus("请先离开当前房间，再更换联机配置。", true);
+      setOnlineSetupStatusI18n("online.switchConfigBlocked", {}, true);
       return;
     }
     const projectUrl = el.onlineProjectUrlInput.value.trim();
     const publishableKey = el.onlinePublishableKeyInput.value.trim();
     if (!projectUrl || !publishableKey) {
-      setOnlineSetupStatus("请输入 Project URL 和 publishable key。", true);
+      setOnlineSetupStatusI18n("online.configRequired", {}, true);
       return;
     }
 
     app.online.connecting = true;
     el.onlineConnectButton.disabled = true;
-    setOnlineSetupStatus("正在建立匿名测试会话……");
+    setOnlineSetupStatusI18n("online.connecting");
     destroyOnlineRuntime();
     try {
       const { transport, bridge, panel } = app.online.modules;
@@ -1805,41 +1954,39 @@
         rulesetHash: app.online.rulesetHash,
         commandExecutor,
         pollIntervalMs: 1_000,
-        onPollError: (error) => setOnlineSetupStatus(`同步失败：${error.message}`, true),
+        onPollError: (error) => setOnlineSetupStatusI18n("online.syncFailed", { reason: error.message }, true),
         onListenerError: (error) => console.error("Online room listener failed.", error),
       });
       app.online.unsubscribe = app.online.runtime.client.subscribe(handleOnlineClientState);
       app.online.panel = panel.createOnlineMultiplayerPanel({
         root: el.onlinePanelRoot,
         client: app.online.runtime.client,
-        labels: {
-          title: "好友联机测试 / Friend Match",
-          create: "创建房间",
-          join: "加入房间",
-          ready: "准备",
-          notReady: "取消准备",
-          reconnect: "重新连接",
-          leave: "离开房间",
-        },
+        labels: onlinePanelLabels(),
         getInitialRoomState: async () => ({
           state: bridge.projectOnlineAuthoritativeState(makeInitialState()),
         }),
-        onError: (error) => setOnlineSetupStatus(`${error.code || "ONLINE_ERROR"}: ${error.message}`, true),
+        onError: (error) => setOnlineSetupStatusI18n("online.operationFailed", {
+          code: error.code || "ONLINE_ERROR",
+          reason: error.message,
+        }, true),
       });
-      setOnlineSetupStatus("已连接测试服务器。可创建房间，或输入好友房间码加入。");
+      setOnlineSetupStatusI18n("online.connected");
       const rememberedRoom = readRememberedOnlineRoom();
       if (rememberedRoom) {
         try {
           await app.online.runtime.client.reconnect({ roomCode: rememberedRoom });
-          setOnlineSetupStatus(`已恢复房间 ${rememberedRoom}。`);
+          setOnlineSetupStatusI18n("online.restoredRoom", { roomCode: rememberedRoom });
         } catch (error) {
           rememberOnlineRoom(null);
-          setOnlineSetupStatus(`旧房间无法恢复：${error.message}`, true);
+          setOnlineSetupStatusI18n("online.restoreFailed", { reason: error.message }, true);
         }
       }
     } catch (error) {
       destroyOnlineRuntime();
-      setOnlineSetupStatus(`${error.code || "ONLINE_SETUP_FAILED"}: ${error.message}`, true);
+      setOnlineSetupStatusI18n("online.operationFailed", {
+        code: error.code || "ONLINE_SETUP_FAILED",
+        reason: error.message,
+      }, true);
     } finally {
       app.online.connecting = false;
       el.onlineConnectButton.disabled = false;
@@ -1867,7 +2014,11 @@
     app.online.runtime?.startPolling?.({ immediate: true });
     if (["active", "finished"].includes(room.status)) adoptOnlineRoomSnapshot(room);
     if (["abandoned", "expired"].includes(room.status)) {
-      setOnlineSetupStatus(`房间 ${room.roomCode} 已${room.status === "abandoned" ? "中止" : "过期"}。`, true);
+      setOnlineSetupStatusI18n(
+        room.status === "abandoned" ? "online.roomAbandoned" : "online.roomExpired",
+        { roomCode: room.roomCode },
+        true,
+      );
       if (el.body.dataset.view === "game") setView("menu");
     }
   }
@@ -1897,7 +2048,10 @@
       await client.submitGameAction(action);
       setOnlineSetupStatus("");
     } catch (error) {
-      setOnlineSetupStatus(`${error.code || "ONLINE_ACTION_FAILED"}: ${error.message}`, true);
+      setOnlineSetupStatusI18n("online.operationFailed", {
+        code: error.code || "ONLINE_ACTION_FAILED",
+        reason: error.message,
+      }, true);
     } finally {
       app.online.submitting = false;
       draw();
@@ -1919,14 +2073,19 @@
     document.querySelectorAll("[data-i18n]").forEach((node) => {
       node.textContent = tr(node.dataset.i18n);
     });
+    document.querySelectorAll("[data-i18n-aria-label]").forEach((node) => {
+      node.setAttribute("aria-label", tr(node.dataset.i18nAriaLabel));
+    });
     el.langZhButton.dataset.active = String(app.lang === "zh");
     el.langEnButton.dataset.active = String(app.lang === "en");
+    renderOnlineSetupStatus();
+    app.online.panel?.setLabels?.(onlinePanelLabels());
     drawAiControls();
   }
 
   function setGameMode(mode) {
     if (hasOnlineRoom()) {
-      setOnlineSetupStatus("请先离开当前联机房间，再切换离线模式。", true);
+      setOnlineSetupStatusI18n("online.offlineSwitchBlocked", {}, true);
       return;
     }
     destroyOnlineRuntime();
@@ -1944,10 +2103,22 @@
   }
 
   function drawAiControls() {
-    if (el.axisAiModeButton) el.axisAiModeButton.dataset.active = String(app.ai.mode === "axis-vs-ai");
-    if (el.alliedAiModeButton) el.alliedAiModeButton.dataset.active = String(app.ai.mode === "allied-vs-ai");
-    if (el.hotseatModeButton) el.hotseatModeButton.dataset.active = String(app.ai.mode === "hotseat");
-    if (el.onlineModeButton) el.onlineModeButton.dataset.active = String(app.online.selected);
+    const selection = app.menuModeSelection.createMenuGameModeSelection({
+      offlineMode: app.ai.mode,
+      onlineSelected: app.online.selected,
+    });
+    const modeButtons = [
+      [el.axisAiModeButton, "axis-vs-ai"],
+      [el.alliedAiModeButton, "allied-vs-ai"],
+      [el.hotseatModeButton, "hotseat"],
+      [el.onlineModeButton, "online"],
+    ];
+    for (const [button, mode] of modeButtons) {
+      if (!button) continue;
+      const active = Boolean(selection[mode]);
+      button.dataset.active = String(active);
+      button.setAttribute("aria-pressed", String(active));
+    }
     el.onlineSetupPanel.hidden = !app.online.selected;
   }
 
@@ -1981,7 +2152,7 @@
 
   function startNewCampaign() {
     if (app.online.selected || hasOnlineRoom()) {
-      setOnlineSetupStatus("联机房间由准备状态启动；不会覆盖本地战役。", true);
+      setOnlineSetupStatusI18n("online.startFromReady", {}, true);
       return;
     }
     localStorage.removeItem(SESSION_KEY);

@@ -76,7 +76,7 @@ export function createOnlineMultiplayerPanel({
     throw new TypeError("getInitialRoomState must be a function when provided");
   }
 
-  const labels = Object.freeze({ ...DEFAULT_LABELS, ...labelOverrides });
+  let labels = Object.freeze({ ...DEFAULT_LABELS, ...labelOverrides });
   let preferredSide = ONLINE_PLAYER_SIDE.AXIS;
   let destroyed = false;
 
@@ -92,14 +92,15 @@ export function createOnlineMultiplayerPanel({
   error.setAttribute("role", "alert");
 
   const roomRow = makeElement(documentRef, "div", "online-multiplayer-room-row");
-  const roomLabel = makeElement(documentRef, "label", "online-multiplayer-room-label", labels.roomCode);
+  const roomLabel = makeElement(documentRef, "label", "online-multiplayer-room-label");
+  const roomLabelText = makeElement(documentRef, "span", "online-multiplayer-room-label-text", labels.roomCode);
   const roomInput = makeElement(documentRef, "input", "online-multiplayer-room-input");
   roomInput.type = "text";
   roomInput.autocomplete = "off";
   roomInput.maxLength = 8;
   roomInput.inputMode = "text";
   roomInput.setAttribute("aria-label", labels.roomCode);
-  roomLabel.append(roomInput);
+  roomLabel.append(roomLabelText, roomInput);
   roomRow.append(roomLabel);
 
   const sideRow = makeElement(documentRef, "div", "online-multiplayer-side-row");
@@ -127,6 +128,21 @@ export function createOnlineMultiplayerPanel({
 
   panel.append(heading, status, roomDetails, roomRow, sideRow, assignment, actionRow, error);
   root.replaceChildren(panel);
+
+  function applyLabels(nextOverrides = {}) {
+    labels = Object.freeze({ ...DEFAULT_LABELS, ...nextOverrides });
+    panel.setAttribute("aria-label", labels.title);
+    heading.textContent = labels.title;
+    roomLabelText.textContent = labels.roomCode;
+    roomInput.setAttribute("aria-label", labels.roomCode);
+    axisButton.textContent = labels.axis;
+    alliedButton.textContent = labels.allied;
+    createButton.textContent = labels.create;
+    joinButton.textContent = labels.join;
+    reconnectButton.textContent = labels.reconnect;
+    leaveButton.textContent = labels.leave;
+    render(client.getState());
+  }
 
   async function perform(operation) {
     try {
@@ -213,6 +229,7 @@ export function createOnlineMultiplayerPanel({
   return Object.freeze({
     element: panel,
     render: () => render(client.getState()),
+    setLabels: applyLabels,
     destroy() {
       if (destroyed) return;
       destroyed = true;
