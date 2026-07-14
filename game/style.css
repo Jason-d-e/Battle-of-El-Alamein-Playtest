@@ -372,6 +372,7 @@ body[data-view="aar"] .game-view {
 }
 
 .board-panel {
+  position: relative;
   min-width: 0;
   padding: 10px;
 }
@@ -385,11 +386,48 @@ body[data-view="aar"] .game-view {
   box-shadow: var(--shadow);
 }
 
+.map-zoom-stage,
 .board-surface {
   position: relative;
   width: 2448px;
   height: 1696px;
+}
+
+.board-surface {
   transform-origin: left top;
+}
+
+.map-zoom-controls {
+  position: absolute;
+  z-index: 60;
+  top: 22px;
+  right: 22px;
+  display: grid;
+  grid-template-columns: 44px 64px 44px;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(255, 239, 179, 0.78);
+  border-radius: 5px;
+  background: rgba(28, 36, 29, 0.94);
+  box-shadow: 0 5px 16px rgba(17, 15, 10, 0.34);
+}
+
+.map-zoom-controls button {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: linear-gradient(#fff8df, #d9c58e);
+  font-size: 1.24rem;
+  line-height: 1;
+}
+
+.map-zoom-controls output {
+  color: #fff1bd;
+  font-size: 0.82rem;
+  font-weight: 900;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 #mapImage,
@@ -1325,6 +1363,11 @@ body[data-lang="zh"] .aar-shell h2 {
 
   .board-panel {
     padding: 8px;
+  }
+
+  .map-zoom-controls {
+    top: 18px;
+    right: 18px;
   }
 
   .board-viewport {
