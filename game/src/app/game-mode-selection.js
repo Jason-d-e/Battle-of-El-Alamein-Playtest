@@ -29,3 +29,15 @@ export function createMenuGameModeSelection(options = {}) {
     ALL_GAME_MODES.map((mode) => [mode, mode === selectedMode]),
   ));
 }
+
+export function createMenuActionState({
+  onlineSelected = false,
+  hasContinuation = false,
+  hasSave = false,
+} = {}) {
+  return Object.freeze({
+    startDisabled: Boolean(onlineSelected),
+    continueDisabled: Boolean(onlineSelected) || !hasContinuation,
+    loadDisabled: Boolean(onlineSelected) || !hasSave,
+  });
+}

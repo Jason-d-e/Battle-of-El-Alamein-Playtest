@@ -31,7 +31,7 @@
   const OPPOSITE_SIDE = { axis: "allied", allied: "axis" };
   const coreRulesPromise = import("./src/core/index.js?v=20260709-zoc-step-1");
   const phaseFlowPromise = import("./src/app/phase-flow.js?v=20260714-empty-movement-confirm-1");
-  const menuModeSelectionPromise = import("./src/app/game-mode-selection.js?v=20260714-online-menu-fix-1");
+  const menuModeSelectionPromise = import("./src/app/game-mode-selection.js?v=20260714-online-menu-fix-2");
   const aiHeuristicsPromise = import("./src/app/ai-heuristics.js?v=20260708-ai-heuristics-16");
   const aiPhaseSearchPromise = import("./src/app/ai-phase-search.js?v=20260709-ai-projection-1");
   const aiTacticsPromise = import("./src/app/ai-tactics.js?v=20260708-ai-tactics-1");
@@ -1914,8 +1914,7 @@
     app.online.selected = true;
     el.onlineSetupPanel.hidden = false;
     setMenuStatus("");
-    drawAiControls();
-    updateMenu();
+    syncMenuModeControls();
   }
 
   async function connectOnlineTestServer() {
@@ -2097,9 +2096,14 @@
     app.ai.scheduled = false;
     localStorage.setItem(AI_GAME_MODE_KEY, app.ai.mode);
     localStorage.setItem(AI_HUMAN_SIDE_KEY, app.ai.humanSide);
-    drawAiControls();
+    syncMenuModeControls();
     drawStatus();
     scheduleAiTurn();
+  }
+
+  function syncMenuModeControls() {
+    drawAiControls();
+    updateMenu();
   }
 
   function drawAiControls() {
@@ -2127,9 +2131,14 @@
   }
 
   function updateMenu() {
-    el.startCampaignButton.disabled = app.online.selected;
-    el.continueCampaignButton.disabled = app.online.selected || !(localStorage.getItem(SESSION_KEY) || localStorage.getItem(CHECKPOINT_KEY));
-    el.menuLoadButton.disabled = app.online.selected || !(localStorage.getItem(SAVE_KEY) || localStorage.getItem(LEGACY_SAVE_KEY));
+    const actionState = app.menuModeSelection.createMenuActionState({
+      onlineSelected: app.online.selected,
+      hasContinuation: Boolean(localStorage.getItem(SESSION_KEY) || localStorage.getItem(CHECKPOINT_KEY)),
+      hasSave: Boolean(localStorage.getItem(SAVE_KEY) || localStorage.getItem(LEGACY_SAVE_KEY)),
+    });
+    el.startCampaignButton.disabled = actionState.startDisabled;
+    el.continueCampaignButton.disabled = actionState.continueDisabled;
+    el.menuLoadButton.disabled = actionState.loadDisabled;
   }
 
   function setView(view) {
