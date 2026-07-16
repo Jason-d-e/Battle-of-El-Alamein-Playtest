@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>阿拉曼战役 / El Alamein</title>
-    <link rel="stylesheet" href="style.css?v=20260714-online-map-zoom-1" />
+    <link rel="stylesheet" href="style.css?v=20260716-online-map-zoom-v3-1" />
   </head>
-  <body data-view="menu" data-lang="zh">
+  <body data-view="menu" data-lang="zh" data-runtime-marker="online-friend-playtest-zoom-v3">
     <section id="menuView" class="menu-view" aria-label="Main menu">
       <div class="menu-panel">
         <p class="eyebrow" data-i18n="menu.eyebrow">North African Campaign</p>
@@ -97,7 +97,28 @@
           </div>
           <div id="mapZoomControls" class="map-zoom-controls" role="group" aria-label="地图缩放">
             <button id="mapZoomOutButton" type="button" aria-label="缩小地图" title="缩小地图">−</button>
-            <output id="mapZoomOutput" aria-live="polite">100%</output>
+            <div class="map-zoom-picker">
+              <button
+                id="mapZoomMenuButton"
+                class="map-zoom-menu-button"
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded="false"
+                aria-controls="mapZoomMenu"
+              >
+                <output id="mapZoomOutput" role="status" aria-live="polite">100%</output>
+                <span aria-hidden="true">▾</span>
+              </button>
+              <div id="mapZoomMenu" class="map-zoom-menu" role="menu" hidden>
+                <button type="button" role="menuitemradio" data-map-zoom-preference="fit" data-i18n="ui.mapZoomFit">自适应</button>
+                <button type="button" role="menuitemradio" data-map-zoom-preference="0.75">75%</button>
+                <button type="button" role="menuitemradio" data-map-zoom-preference="1">100%</button>
+                <button type="button" role="menuitemradio" data-map-zoom-preference="1.25">125%</button>
+                <button type="button" role="menuitemradio" data-map-zoom-preference="1.5">150%</button>
+                <button type="button" role="menuitemradio" data-map-zoom-preference="1.75">175%</button>
+                <button type="button" role="menuitemradio" data-map-zoom-preference="2">200%</button>
+              </div>
+            </div>
             <button id="mapZoomInButton" type="button" aria-label="放大地图" title="放大地图">+</button>
           </div>
         </section>
@@ -191,6 +212,6 @@
       </div>
     </template>
 
-    <script src="game.js?v=20260714-online-map-zoom-1" defer></script>
+    <script src="game.js?v=20260716-online-map-zoom-v3-1" defer></script>
   </body>
 </html>

@@ -297,9 +297,17 @@ button:disabled {
 }
 
 .game-view {
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
   background:
     linear-gradient(90deg, #3d463c 0, #3d463c 72%, #cfc4ad 72%, #cfc4ad 100%);
+}
+
+body[data-view="game"] {
+  overflow: hidden;
 }
 
 body[data-view="menu"] .game-view,
@@ -367,19 +375,25 @@ body[data-view="aar"] .game-view {
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 398px;
-  min-height: calc(100vh - 69px);
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr) clamp(398px, 24vw, 520px);
+  height: auto;
+  min-height: 0;
 }
 
 .board-panel {
   position: relative;
+  display: flex;
   min-width: 0;
+  min-height: 0;
   padding: 10px;
 }
 
 .board-viewport {
+  flex: 1 1 auto;
   width: 100%;
-  height: calc(100vh - 91px);
+  height: auto;
+  min-height: 0;
   overflow: auto;
   border: 1px solid #93805a;
   background: #485047;
@@ -395,17 +409,18 @@ body[data-view="aar"] .game-view {
 
 .board-surface {
   transform-origin: left top;
+  transition: transform 80ms linear;
+  will-change: transform;
 }
 
 .map-zoom-controls {
   position: absolute;
   z-index: 60;
   top: 22px;
-  right: 22px;
+  right: calc(22px + var(--map-scrollbar-width, 0px));
   display: grid;
-  grid-template-columns: 44px 64px 44px;
+  grid-template-columns: 44px 76px 44px;
   align-items: center;
-  overflow: hidden;
   border: 1px solid rgba(255, 239, 179, 0.78);
   border-radius: 5px;
   background: rgba(28, 36, 29, 0.94);
@@ -422,12 +437,69 @@ body[data-view="aar"] .game-view {
   line-height: 1;
 }
 
-.map-zoom-controls output {
+.map-zoom-controls > button {
+  touch-action: none;
+  user-select: none;
+}
+
+.map-zoom-picker {
+  position: relative;
+  height: 44px;
+}
+
+.map-zoom-controls .map-zoom-menu-button {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 6px;
+  color: #fff1bd;
+  background: rgba(28, 36, 29, 0.98);
+  font-size: 0.74rem;
+}
+
+.map-zoom-menu-button output {
   color: #fff1bd;
   font-size: 0.82rem;
   font-weight: 900;
   text-align: center;
   font-variant-numeric: tabular-nums;
+}
+
+.map-zoom-menu {
+  position: absolute;
+  z-index: 70;
+  top: calc(100% + 7px);
+  left: 50%;
+  display: grid;
+  width: 112px;
+  padding: 5px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(255, 239, 179, 0.78);
+  border-radius: 5px;
+  background: rgba(28, 36, 29, 0.98);
+  box-shadow: 0 5px 16px rgba(17, 15, 10, 0.42);
+}
+
+.map-zoom-menu[hidden] {
+  display: none;
+}
+
+.map-zoom-controls .map-zoom-menu button {
+  width: 100%;
+  min-height: 44px;
+  padding: 5px 8px;
+  color: #2d342e;
+  background: #efe4bd;
+  font-size: 0.78rem;
+  text-align: left;
+}
+
+.map-zoom-controls .map-zoom-menu button[aria-checked="true"] {
+  color: #fff4c8;
+  background: #536348;
 }
 
 #mapImage,
@@ -537,7 +609,9 @@ body[data-view="aar"] .game-view {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: calc(100vh - 69px);
+  height: 100%;
+  min-height: 0;
+  max-height: none;
   overflow: auto;
   padding: 10px 10px 10px 0;
 }
@@ -1323,12 +1397,29 @@ body[data-lang="zh"] .aar-shell h2 {
 }
 
 @media (max-width: 1120px) {
+  body[data-view="game"] {
+    overflow: auto;
+  }
+
+  .game-view {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
   .layout,
   .aar-shell {
     grid-template-columns: 1fr;
   }
 
+  .layout {
+    flex: none;
+    height: auto;
+    min-height: calc(100vh - 69px);
+  }
+
   .side-panel {
+    height: auto;
     max-height: none;
     padding: 0 10px 10px;
   }
@@ -1367,7 +1458,7 @@ body[data-lang="zh"] .aar-shell h2 {
 
   .map-zoom-controls {
     top: 18px;
-    right: 18px;
+    right: calc(18px + var(--map-scrollbar-width, 0px));
   }
 
   .board-viewport {

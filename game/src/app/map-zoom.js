@@ -1,8 +1,16 @@
 export const MAP_ZOOM_LEVELS = Object.freeze([0.75, 1, 1.25, 1.5, 1.75, 2]);
 export const DEFAULT_MAP_ZOOM = 1;
+export const FIT_MAP_ZOOM = "fit";
+export const MAP_ZOOM_CLICK_STEP = 0.05;
+export const MAP_ZOOM_HOLD_STEP = 0.01;
+export const ONLINE_MAP_ZOOM_STORAGE_KEY = "zizi-el-alamein-online-map-zoom-v3";
+
+const MAP_ZOOM_EPSILON = 1e-9;
+const MIN_RENDERED_MAP_ZOOM = 0.5;
+const MAX_RENDERED_MAP_ZOOM = 4;
 
 /**
- * Clamps and snaps a persisted map zoom value to a supported UI step.
+ * Clamps a persisted manual percentage without snapping smooth adjustments.
  *
  * @param {unknown} value Candidate zoom value.
  * @returns {number} Supported zoom multiplier.
@@ -11,32 +19,135 @@ export function normalizeMapZoom(value) {
   if (value === null || value === undefined || value === "") return DEFAULT_MAP_ZOOM;
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return DEFAULT_MAP_ZOOM;
-  return MAP_ZOOM_LEVELS.reduce((nearest, level) => (
-    Math.abs(level - numeric) < Math.abs(nearest - numeric) ? level : nearest
-  ), MAP_ZOOM_LEVELS[0]);
+  return clampMapZoom(numeric);
 }
 
 /**
- * Moves one step through the fixed map zoom scale.
- *
- * @param {unknown} current Current zoom value.
- * @param {number} direction Negative to zoom out, positive to zoom in.
- * @returns {number} Next supported zoom multiplier.
+ * Keeps a continuous fitted zoom inside the same legal 75%-200% range.
  */
+export function clampMapZoom(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return DEFAULT_MAP_ZOOM;
+  return Math.max(MAP_ZOOM_LEVELS[0], Math.min(MAP_ZOOM_LEVELS[MAP_ZOOM_LEVELS.length - 1], numeric));
+}
+
+export function normalizeMapZoomPreference(value) {
+  if (value === null || value === undefined || value === "" || value === FIT_MAP_ZOOM) return FIT_MAP_ZOOM;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? normalizeMapZoom(numeric) : FIT_MAP_ZOOM;
+}
+
+/**
+ * Reads only the Online namespace. The former shared v1 key is intentionally
+ * ignored so Foundation, Alpha, and Online preferences cannot leak together.
+ */
+export function readOnlineMapZoomPreference(storage) {
+  try {
+    return normalizeMapZoomPreference(storage?.getItem?.(ONLINE_MAP_ZOOM_STORAGE_KEY));
+  } catch {
+    return FIT_MAP_ZOOM;
+  }
+}
+
+export function writeOnlineMapZoomPreference(storage, preference) {
+  const normalized = normalizeMapZoomPreference(preference);
+  try {
+    storage?.setItem?.(ONLINE_MAP_ZOOM_STORAGE_KEY, String(normalized));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function calculateFitMapZoom({ viewportWidth, viewportHeight, mapWidth, mapHeight } = {}) {
+  const availableWidth = finiteNumber(viewportWidth);
+  const availableHeight = finiteNumber(viewportHeight);
+  const naturalWidth = finiteNumber(mapWidth);
+  const naturalHeight = finiteNumber(mapHeight);
+  if (availableWidth <= 0 || availableHeight <= 0 || naturalWidth <= 0 || naturalHeight <= 0) {
+    return DEFAULT_MAP_ZOOM;
+  }
+  return clampMapZoom(Math.min(availableWidth / naturalWidth, availableHeight / naturalHeight));
+}
+
+/**
+ * Applies a manual percentage to the current fitted viewport baseline. Manual
+ * 100% therefore occupies the same whole-map height as Fit at that viewport.
+ */
+export function calculateMapZoomForPreference({ fitZoom, preference } = {}) {
+  const fitted = clampMapZoom(fitZoom);
+  if (normalizeMapZoomPreference(preference) === FIT_MAP_ZOOM) return fitted;
+  return clampRenderedMapZoom(fitted * normalizeMapZoom(preference));
+}
+
+export function adjustMapZoomPreference(current, direction, step = MAP_ZOOM_CLICK_STEP) {
+  const value = normalizeMapZoomPreference(current) === FIT_MAP_ZOOM
+    ? DEFAULT_MAP_ZOOM
+    : normalizeMapZoom(current);
+  const delta = Math.abs(Number(step)) || MAP_ZOOM_CLICK_STEP;
+  const signedDelta = Number(direction) < 0 ? -delta : Number(direction) > 0 ? delta : 0;
+  return roundMapZoom(clampMapZoom(value + signedDelta));
+}
+
+/**
+ * Applies at most two synchronous Fit passes so scrollbar removal from the
+ * first pass cannot leave a stale viewport measurement behind.
+ */
+export function fitMapZoomWithStabilization({
+  measureViewport,
+  applyZoom,
+  mapWidth,
+  mapHeight,
+  maxPasses = 2,
+} = {}) {
+  if (typeof measureViewport !== "function" || typeof applyZoom !== "function") {
+    throw new TypeError("Fit stabilization requires measureViewport and applyZoom functions");
+  }
+  const passCount = Math.max(1, Math.min(4, Math.trunc(Number(maxPasses)) || 2));
+  let appliedZoom = null;
+  for (let pass = 0; pass < passCount; pass += 1) {
+    const viewport = measureViewport() || {};
+    const nextZoom = calculateFitMapZoom({
+      viewportWidth: viewport.viewportWidth,
+      viewportHeight: viewport.viewportHeight,
+      mapWidth,
+      mapHeight,
+    });
+    if (appliedZoom !== null && Math.abs(nextZoom - appliedZoom) <= MAP_ZOOM_EPSILON) return appliedZoom;
+    applyZoom(nextZoom, pass);
+    appliedZoom = nextZoom;
+  }
+  return appliedZoom ?? DEFAULT_MAP_ZOOM;
+}
+
+/**
+ * Repeats the synchronous Fit calculation on the next rendering frame. Chrome
+ * updates clientHeight only after painting when a zoom removes a scrollbar.
+ */
+export function fitMapZoomWithDeferredStabilization({ scheduler = globalThis, ...fitOptions } = {}) {
+  fitMapZoomWithStabilization(fitOptions);
+  if (typeof scheduler?.requestAnimationFrame !== "function") return () => {};
+  let frameId = scheduler.requestAnimationFrame(() => {
+    frameId = null;
+    fitMapZoomWithStabilization(fitOptions);
+  });
+  return () => {
+    if (frameId !== null) scheduler.cancelAnimationFrame?.(frameId);
+    frameId = null;
+  };
+}
+
+// Compatibility for older callers; the control now advances by 5%, not 25%.
 export function stepMapZoom(current, direction) {
-  const normalized = normalizeMapZoom(current);
-  const currentIndex = MAP_ZOOM_LEVELS.indexOf(normalized);
-  const offset = Number(direction) < 0 ? -1 : Number(direction) > 0 ? 1 : 0;
-  const nextIndex = Math.max(0, Math.min(MAP_ZOOM_LEVELS.length - 1, currentIndex + offset));
-  return MAP_ZOOM_LEVELS[nextIndex];
+  return adjustMapZoomPreference(current, direction, MAP_ZOOM_CLICK_STEP);
 }
 
 export function formatMapZoom(value) {
-  return `${Math.round(normalizeMapZoom(value) * 100)}%`;
+  return `${Math.round(clampMapZoom(value) * 100)}%`;
 }
 
 export function mapZoomStageSize({ width, height, zoom } = {}) {
-  const normalized = normalizeMapZoom(zoom);
+  const normalized = clampRenderedMapZoom(zoom);
   return {
     width: Math.max(0, Math.round(finiteNumber(width) * normalized)),
     height: Math.max(0, Math.round(finiteNumber(height) * normalized)),
@@ -55,8 +166,8 @@ export function preserveMapViewportCenter({
   currentZoom = DEFAULT_MAP_ZOOM,
   nextZoom = DEFAULT_MAP_ZOOM,
 } = {}) {
-  const current = normalizeMapZoom(currentZoom);
-  const next = normalizeMapZoom(nextZoom);
+  const current = clampRenderedMapZoom(currentZoom);
+  const next = clampRenderedMapZoom(nextZoom);
   const width = finiteNumber(clientWidth);
   const height = finiteNumber(clientHeight);
   const centerX = (finiteNumber(scrollLeft) + width / 2) / current;
@@ -65,6 +176,16 @@ export function preserveMapViewportCenter({
     scrollLeft: Math.max(0, centerX * next - width / 2),
     scrollTop: Math.max(0, centerY * next - height / 2),
   };
+}
+
+export function clampRenderedMapZoom(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return DEFAULT_MAP_ZOOM;
+  return Math.max(MIN_RENDERED_MAP_ZOOM, Math.min(MAX_RENDERED_MAP_ZOOM, numeric));
+}
+
+function roundMapZoom(value) {
+  return Math.round(value * 10000) / 10000;
 }
 
 function finiteNumber(value) {
